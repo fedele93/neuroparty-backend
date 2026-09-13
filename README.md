@@ -41,14 +41,14 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
 ## Deploy su Ubuntu con Docker e sottodominio
 
 Prerequisiti: un server Ubuntu 22.04/24.04 raggiungibile da Internet (porte 80 e 443 aperte)
-e un sottodominio del tuo dominio, es. `festa.tuodominio.it`.
+e un sottodominio del tuo dominio, es. `neurospec.peukeia.eu`.
 
 ### 1. DNS
 
 Nel pannello del tuo dominio crea un record **A** (e **AAAA** se hai IPv6):
 
 ```
-festa.tuodominio.it  ->  <IP pubblico del server>
+neurospec.peukeia.eu  ->  <IP pubblico del server>
 ```
 
 ### 2. Installazione (script automatico)
@@ -79,11 +79,11 @@ nano .env
 
 | Variabile | Valore |
 |---|---|
-| `DOMAIN` | `festa.tuodominio.it` |
+| `DOMAIN` | `neurospec.peukeia.eu` |
 | `ACME_EMAIL` | la tua email (avvisi Let's Encrypt) |
-| `PUBLIC_URL` | `https://festa.tuodominio.it` |
+| `PUBLIC_URL` | `https://neurospec.peukeia.eu` |
 | `ADMIN_TOKEN` | stringa segreta lunga (`openssl rand -hex 24`) |
-| `VAPID_SUBJECT` | `mailto:tua@email.it` |
+| `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
 
@@ -96,15 +96,15 @@ docker compose logs -f        # Ctrl+C per uscire
 
 Caddy richiede il certificato HTTPS in automatico. Dopo circa un minuto:
 
-- `https://festa.tuodominio.it/` -> la PWA (installabile su iPhone da Safari con
+- `https://neurospec.peukeia.eu/` -> la PWA (installabile su iPhone da Safari con
   "Aggiungi alla schermata Home", su Android da Chrome con "Installa app")
-- `https://festa.tuodominio.it/api/health` -> `{"status":"ok"}`
-- `https://festa.tuodominio.it/docs` -> documentazione API
+- `https://neurospec.peukeia.eu/api/health` -> `{"status":"ok"}`
+- `https://neurospec.peukeia.eu/docs` -> documentazione API
 
 ### 5. Collega le app
 
 - **PWA**: nessuna configurazione, usa lo stesso dominio.
-- **App Android**: nel repo `spec2026app` imposta `API_BASE_URL=https://festa.tuodominio.it`
+- **App Android**: nel repo `spec2026app` imposta `API_BASE_URL=https://neurospec.peukeia.eu`
   nel file `.env` prima di compilare (vedi il README dell'app).
 - **Organizzatori**: nella PWA apri ⚙️ Impostazioni e inserisci l'`ADMIN_TOKEN`; nell'app
   Android mettilo in `.env` (`ADMIN_TOKEN=...`) prima della build.
