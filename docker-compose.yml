@@ -1,0 +1,39 @@
+# Avvio in produzione (Ubuntu + Docker):  docker compose up -d --build
+# Caddy ottiene e rinnova da solo il certificato HTTPS per $DOMAIN (Let's Encrypt).
+services:
+  api:
+    build: .
+    container_name: neuroparty-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      SEED_FILE: /app/seed/event-data.json
+    volumes:
+      - ./data:/data                                     # DB SQLite, foto caricate, chiavi VAPID
+      - ./seed/event-data.json:/app/seed/event-data.json:ro
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: neuroparty-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Imposta DOMAIN nel file .env (es. festa.tuodominio.it)}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PWA_DIR:-../spec2026app/pwa}:/srv/pwa:ro      # la PWA viene dal repo spec2026app
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

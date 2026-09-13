@@ -1,0 +1,17 @@
+# Sviluppo locale senza HTTPS/Caddy:  docker compose -f docker-compose.dev.yml up --build
+# API + PWA su http://localhost:8000
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      SEED_FILE: /app/seed/event-data.json
+      PWA_DIR: /srv/pwa
+      SEED_DEMO_DATA: "true"
+    volumes:
+      - ./data-dev:/data
+      - ./seed/event-data.json:/app/seed/event-data.json:ro
+      - ${PWA_DIR:-../spec2026app/pwa}:/srv/pwa:ro
+    ports:
+      - "8000:8000"

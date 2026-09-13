@@ -1,0 +1,36 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API e foto caricate -> container FastAPI
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle /uploads/* {
+		reverse_proxy api:8000
+	}
+	handle /docs* {
+		reverse_proxy api:8000
+	}
+	handle /openapi.json {
+		reverse_proxy api:8000
+	}
+
+	# Tutto il resto -> PWA (file statici, cartella pwa/ del repo spec2026app)
+	handle {
+		root * /srv/pwa
+		header /sw.js Cache-Control "no-cache"
+		header /index.html Cache-Control "no-cache"
+		header /manifest.webmanifest Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
