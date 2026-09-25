@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from ..models import (
     now_ms,
 )
 from ..push import subscription_count
+from ..schedule import build_ics
 from ..seed import public_event_info
 from ..state import get_version
 
@@ -29,6 +31,18 @@ def health():
 def event_info(request: Request):
     """Dati statici dell'evento (programma, mappa, navetta, laureandi) letti da event-data.json."""
     return public_event_info(request.app.state.event_data)
+
+
+@router.get("/event/calendar.ics")
+def event_calendar(request: Request):
+    """File iCalendar con seduta e festa (date/orari dal blocco "schedule" del JSON):
+    su iPhone e Android apre direttamente "Aggiungi al calendario"."""
+    ics = build_ics(request.app.state.event_data, request.app.state.settings.public_url)
+    return Response(
+        content=ics,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'inline; filename="neuroparty.ics"', "Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/state")
@@ -59,6 +73,11 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
             c.to_dict() for c in db.scalars(select(GiftContribution).order_by(GiftContribution.contributed_at.desc())).all()
         ],
         "notifications": [
-            n.to_dict() for n in db.scalars(select(EventNotification).order_by(EventNotification.timestamp.desc())).all()
+            n.to_dict()
+            for n in db.scalars(
+                select(EventNotification)
+                .where(EventNotification.scheduled_at.is_(None))
+                .order_by(EventNotification.timestamp.desc())
+            ).all()
         ],
     }

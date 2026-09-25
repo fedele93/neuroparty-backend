@@ -86,6 +86,8 @@ class NotificationIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     message: str = Field(min_length=1, max_length=2000)
     category: str = Field(default="Organizzazione", max_length=50)
+    # Timestamp (ms) a cui pubblicare la notifica; assente o nel passato = invio immediato.
+    sendAt: int | None = Field(default=None, ge=0)
 
     @field_validator("title", "message")
     @classmethod
