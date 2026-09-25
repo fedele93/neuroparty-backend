@@ -1,0 +1,23 @@
+# Custom compose per l'infrastruttura esistente (Caddy condiviso su proxy_network).
+# NON usa il Caddy incluso nel repo (porte 80/443 già occupate dal Caddy principale).
+# Avvio:  docker compose -f docker-compose.prod.yml up -d --build
+services:
+  api:
+    build: .
+    container_name: neuroparty-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      SEED_FILE: /app/seed/event-data.json
+      PWA_DIR: /srv/pwa
+    volumes:
+      - ./data:/data
+      - ./seed/event-data.json:/app/seed/event-data.json:ro
+      - ../spec2026app/pwa:/srv/pwa:ro
+    networks:
+      - proxy_network
+
+networks:
+  proxy_network:
+    external: true
