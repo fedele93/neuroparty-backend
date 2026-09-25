@@ -5,5 +5,5 @@ cd "$(dirname "$0")/.."
 git pull --ff-only
 PWA="${PWA_DIR:-../spec2026app}"
 if [ -d "$PWA/.git" ]; then (cd "$PWA" && git pull --ff-only); fi
-docker compose up -d --build
-docker compose ps
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
