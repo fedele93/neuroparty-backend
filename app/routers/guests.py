@@ -17,6 +17,45 @@ def list_guests(db: Session = Depends(get_db)):
     return [g.to_dict() for g in rows]
 
 
+# Note alimentari che significano "nessuna esigenza" (non vanno nel riepilogo per il catering)
+_NO_DIET = {"", "nessuna", "nessuna restrizione", "no", "-", "niente", "nessuno"}
+
+
+def guests_summary(guests: list[Guest]) -> dict:
+    """Numeri per il catering: coperti confermati, per categoria ed esigenze alimentari."""
+    confirmed = [g for g in guests if g.rsvp_status == "CONFIRMED"]
+    pending = [g for g in guests if g.rsvp_status == "PENDING"]
+    declined = [g for g in guests if g.rsvp_status == "DECLINED"]
+    by_category: dict[str, dict] = {}
+    for g in confirmed:
+        cat = by_category.setdefault(g.category or "Invitato", {"category": g.category or "Invitato", "guests": 0, "covers": 0})
+        cat["guests"] += 1
+        cat["covers"] += g.guests_count
+    dietary: dict[str, dict] = {}
+    for g in confirmed:
+        note = (g.dietary_notes or "").strip()
+        if note.lower() in _NO_DIET:
+            continue
+        d = dietary.setdefault(note.lower(), {"note": note, "guests": [], "covers": 0})
+        d["guests"].append(g.full_name)
+        d["covers"] += g.guests_count
+    return {
+        "confirmedGuests": len(confirmed),
+        "covers": sum(g.guests_count for g in confirmed),
+        "pendingGuests": len(pending),
+        "pendingCovers": sum(g.guests_count for g in pending),
+        "declinedGuests": len(declined),
+        "byCategory": sorted(by_category.values(), key=lambda c: (-c["covers"], c["category"])),
+        "dietary": sorted(dietary.values(), key=lambda d: (-d["covers"], d["note"])),
+    }
+
+
+@router.get("/summary")
+def summary(db: Session = Depends(get_db)):
+    """Riepilogo coperti e menu speciali (per ristorante e organizzatori)."""
+    return guests_summary(db.scalars(select(Guest)).all())
+
+
 @router.post("", status_code=201)
 def create_guest(body: GuestIn, db: Session = Depends(get_db), client_id: str | None = Depends(get_client_id)):
     guest = Guest(

@@ -5,3 +5,4 @@ data-dev/
 __pycache__/
 *.pyc
 .pytest_cache/
+backups/

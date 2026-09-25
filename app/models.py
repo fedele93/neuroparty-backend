@@ -175,6 +175,9 @@ class EventNotification(Base):
     message: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(50), default="Organizzazione")
     timestamp: Mapped[int] = mapped_column(Integer, default=now_ms)
+    # Se valorizzato la notifica è programmata: invisibile agli invitati e non ancora inviata
+    # in push finché lo scheduler non la pubblica (vedi app/scheduler.py).
+    scheduled_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     def to_dict(self) -> dict:
         # isRead è uno stato del singolo dispositivo: il server lo espone sempre a false.
@@ -184,6 +187,7 @@ class EventNotification(Base):
             "message": self.message,
             "category": self.category,
             "timestamp": self.timestamp,
+            "scheduledAt": self.scheduled_at,
             "isRead": False,
         }
 

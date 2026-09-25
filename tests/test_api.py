@@ -284,3 +284,103 @@ def test_calendar_ics(tmp_path):
         assert "DTSTART;TZID=Europe/Rome:20261113T203000" in body
         assert "DTEND;TZID=Europe/Rome:20261114T013000" in body
         assert "DTSTART;VALUE=DATE:20261109" in body  # la seduta resta senza orario
+
+
+def test_guests_summary(client):
+    s = client.get("/api/guests/summary").json()
+    assert s["confirmedGuests"] == 5 and s["covers"] == 10
+    assert s["pendingGuests"] == 1 and s["pendingCovers"] == 2 and s["declinedGuests"] == 1
+    cats = {c["category"]: c for c in s["byCategory"]}
+    assert cats["Famigliari"] == {"category": "Famigliari", "guests": 2, "covers": 6}
+    notes = {d["note"]: d for d in s["dietary"]}
+    assert "Nessuna" not in notes and "Nessuna restrizione" not in notes
+    assert notes["1 Celiaco (menu senza glutine)"]["guests"] == ["Matteo Moretti & Famiglia"]
+    assert notes["Opzione Vegetariana"]["covers"] == 1
+
+
+def test_csv_export_requires_admin(client):
+    assert client.get("/api/export/guests.csv").status_code == 403
+    r = client.get("/api/export/guests.csv", headers=ADMIN)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert 'filename="invitati.csv"' in r.headers["content-disposition"]
+    lines = r.text.lstrip("\ufeff").splitlines()
+    assert lines[0] == "Nome;Categoria;Stato RSVP;Persone;Esigenze alimentari;Contatto;Aggiornato il"
+    assert len(lines) == 8  # intestazione + 7 invitati demo
+    assert any(line.startswith("Dott. Luca Gatti;Colleghi Reparto;In attesa;2;") for line in lines)
+
+    r = client.get("/api/export/bus.csv", headers=ADMIN)
+    lines = r.text.lstrip("\ufeff").splitlines()
+    assert lines[0].startswith("Passeggero;Posti;Fermata;Ritorno")
+    assert lines[-1].startswith("TOTALE POSTI;10;")
+
+
+def test_scheduled_notification_lifecycle(client):
+    from app.scheduler import publish_due_notifications
+
+    n0 = len(client.get("/api/notifications").json())
+    v0 = client.get("/api/state").json()["version"]
+    future = client.get("/api/state").json()["serverTime"] + 3_600_000
+    body = {"title": "🚌 Navetta in partenza", "message": "Tra 15 minuti", "category": "Navetta", "sendAt": future}
+    r = client.post("/api/notifications", json=body, headers=ADMIN)
+    assert r.status_code == 201 and r.json()["scheduledAt"] == future
+    nid = r.json()["id"]
+
+    # invisibile agli invitati, nessun cambio di versione, visibile agli organizzatori
+    assert len(client.get("/api/notifications").json()) == n0
+    assert len(client.get("/api/snapshot").json()["notifications"]) == n0
+    assert client.get("/api/state").json()["version"] == v0
+    assert client.get("/api/notifications/scheduled").status_code == 403
+    scheduled = client.get("/api/notifications/scheduled", headers=ADMIN).json()
+    assert [x["id"] for x in scheduled] == [nid]
+
+    # non ancora scaduta: lo scheduler non la tocca
+    app = client.app
+    assert publish_due_notifications(app.state.session_factory, app.state.push) == []
+    # arrivata l'ora: pubblicata, versione incrementata, in cima alla cronologia
+    published = publish_due_notifications(app.state.session_factory, app.state.push, now=future + 1)
+    assert [x["id"] for x in published] == [nid] and published[0]["scheduledAt"] is None
+    assert client.get("/api/notifications").json()[0]["id"] == nid
+    assert client.get("/api/state").json()["version"] == v0 + 1
+    assert client.get("/api/notifications/scheduled", headers=ADMIN).json() == []
+
+    # sendAt nel passato = invio immediato; cancellazione riservata agli organizzatori
+    r = client.post("/api/notifications", json={**body, "sendAt": 1}, headers=ADMIN)
+    assert r.status_code == 201 and r.json()["scheduledAt"] is None
+    assert client.delete(f"/api/notifications/{r.json()['id']}").status_code == 403
+    assert client.delete(f"/api/notifications/{r.json()['id']}", headers=ADMIN).status_code == 204
+    assert client.delete(f"/api/notifications/{r.json()['id']}", headers=ADMIN).status_code == 404
+
+
+def test_schema_migration_adds_scheduled_at(tmp_path):
+    """Un database creato prima delle notifiche programmate viene aggiornato all'avvio."""
+    import sqlite3
+
+    from app.db import ensure_schema, make_engine
+
+    (tmp_path / "data").mkdir()
+    path = tmp_path / "data" / "neuroparty.db"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE event_notifications (id INTEGER PRIMARY KEY, title VARCHAR(300), message TEXT, category VARCHAR(50), timestamp INTEGER)")
+    con.execute("INSERT INTO event_notifications (title, message, category, timestamp) VALUES ('vecchia', 'm', 'Festa', 1)")
+    con.commit(); con.close()
+
+    assert ensure_schema(make_engine(str(path))) == ["event_notifications.scheduled_at"]
+    assert ensure_schema(make_engine(str(path))) == []  # idempotente
+    with make_client(tmp_path, demo=False) as c:
+        notes = c.get("/api/notifications").json()
+        assert [n["title"] for n in notes] == ["vecchia"] and notes[0]["scheduledAt"] is None
+
+
+def test_iban_validation_detects_placeholders():
+    from app.validation import iban_is_valid, placeholder_gift_issues
+
+    assert iban_is_valid("IT60 X054 2811 1010 0000 0123 456")  # esempio ufficiale valido
+    assert iban_is_valid("DE89370400440532013000")
+    assert not iban_is_valid("IT78 K030 6909 6061 0000 1234 567")  # segnaposto del seed
+    assert not iban_is_valid("") and not iban_is_valid("ciao")
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    issues = placeholder_gift_issues(data)
+    assert len(issues) == len(data["giftTargets"])  # tutti segnaposto, per ora
+    data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
+    assert len(placeholder_gift_issues(data)) == len(data["giftTargets"]) - 1

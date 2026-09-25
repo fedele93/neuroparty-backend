@@ -30,6 +30,8 @@ class Settings:
     vapid_subject: str = field(default_factory=lambda: os.environ.get("VAPID_SUBJECT", "mailto:admin@example.org"))
     # Origini autorizzate per CORS ("*" = tutte; utile se la PWA è su GitHub Pages).
     cors_origins: str = field(default_factory=lambda: os.environ.get("CORS_ORIGINS", "*"))
+    # Ogni quanti secondi lo scheduler controlla le notifiche programmate da pubblicare.
+    scheduler_interval_s: float = field(default_factory=lambda: float(os.environ.get("SCHEDULER_INTERVAL_S", "20")))
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "10")))
     max_bus_seats_override: int | None = field(
         default_factory=lambda: int(os.environ["MAX_BUS_SEATS"]) if os.environ.get("MAX_BUS_SEATS") else None

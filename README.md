@@ -15,11 +15,14 @@ arrivano davvero a tutti.
 | Dati dell'evento (programma, mappa, navetta, laureandi, orari) | `GET /api/event` |
 | Calendario (seduta + festa) da aggiungere al telefono | `GET /api/event/calendar.ics` |
 | Invitati & RSVP | `GET/POST /api/guests`, `PUT/DELETE /api/guests/{id}` |
+| Riepilogo per il catering (coperti, categorie, menu speciali) | `GET /api/guests/summary` |
 | Navetta (con controllo dei 54 posti) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}` |
 | Bacheca auguri | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart` |
 | Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like` |
 | Regali e quote | `GET /api/gifts/targets`, `GET/POST /api/gifts/contributions` |
 | Notifiche (cronologia + **Web Push** a tutti i dispositivi) | `GET /api/notifications`, `POST /api/notifications` (solo organizzatori) |
+| Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
+| Export CSV per ristorante e autista | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori) |
 | Sottoscrizione push del browser | `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` |
 | Sincronizzazione app Android in una chiamata | `GET /api/snapshot`, `GET /api/state` |
 
@@ -126,6 +129,41 @@ VAPID). Basta copiarla:
 tar czf backup-neuroparty-$(date +%F).tgz data/
 ```
 
+### Backup automatico
+
+`scripts/backup.sh` crea `backups/backup-neuroparty-<data>.tgz` con una copia consistente del
+database (API di backup di SQLite, anche a server acceso), le foto e le chiavi VAPID, e
+cancella i backup più vecchi di 7 giorni (`KEEP_DAYS`). Per farlo girare ogni notte alle 03:15:
+
+```bash
+./scripts/install-backup-cron.sh        # aggiunge la riga al crontab (idempotente)
+./scripts/install-backup-cron.sh --remove
+```
+
+Copia periodicamente la cartella `backups/` fuori dal server (es. `scp` o rclone).
+
+### Esportare invitati e navetta (CSV)
+
+Dalla PWA, con il token organizzatore, in ⚙️ Impostazioni ci sono i pulsanti **Esporta
+invitati** e **Esporta navetta**. Da terminale:
+
+```bash
+curl -H "X-Admin-Token: $ADMIN_TOKEN" https://neurospec.peukeia.eu/api/export/guests.csv -o invitati.csv
+curl -H "X-Admin-Token: $ADMIN_TOKEN" https://neurospec.peukeia.eu/api/export/bus.csv -o navetta.csv
+```
+
+Separatore `;` e BOM UTF-8: Excel italiano li apre con un doppio clic. `navetta.csv`
+termina con la riga del totale posti. `GET /api/guests/summary` restituisce gli stessi numeri
+per il catering in JSON (coperti confermati, per categoria, esigenze alimentari con i nomi).
+
+### Notifiche programmate
+
+`POST /api/notifications` accetta `sendAt` (timestamp in millisecondi): se è nel futuro la
+notifica resta in attesa, invisibile agli invitati, e viene pubblicata e inviata in push
+all'ora indicata da un controllo in background (ogni `SCHEDULER_INTERVAL_S` secondi, default
+20). Gli organizzatori la vedono in `GET /api/notifications/scheduled` e possono annullarla con
+`DELETE /api/notifications/{id}`. Nella PWA: campo **Programma l'invio** nel dialogo di invio.
+
 ### Inviare una notifica dal terminale
 
 ```bash
@@ -164,7 +202,10 @@ o obiettivo di un regalo già esistente modifica il JSON e riavvia con
 `GIFT_SYNC_UPDATE_TEXTS=true` nel `.env` (le quote raccolte non vengono mai modificate); i
 client ricaricano i dati da soli perché la versione viene incrementata.
 
-> Attenzione: gli IBAN e i link di pagamento nel file di esempio sono segnaposto.
+> Attenzione: gli IBAN e i link di pagamento nel file di esempio sono segnaposto. All'avvio in
+> produzione (`SEED_DEMO_DATA=false`) il server scrive un avviso nel log per ogni IBAN che non
+> supera il controllo di validità; nel repo dell'app `python3 tools/check-event-data.py --strict`
+> fa lo stesso controllo e blocca la release finché restano IBAN finti.
 
 ## Sviluppo locale
 
@@ -189,11 +230,13 @@ app/
   auth.py          X-Admin-Token / X-Client-Id
   push.py          Web Push (VAPID)
   schedule.py      orari (blocco "schedule"), segnaposto nei testi, calendario .ics
-  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event
+  scheduler.py     pubblicazione delle notifiche programmate (ciclo in background)
+  validation.py    controllo IBAN (segnalazione dei segnaposto)
+  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event, export
 seed/event-data.json
-tests/             pytest (17 test)
+tests/             pytest (22 test)
 Dockerfile, docker-compose.yml, Caddyfile
-scripts/           install-ubuntu.sh, update.sh, send-notification.sh
+scripts/           install-ubuntu.sh, update.sh, send-notification.sh, backup.sh, install-backup-cron.sh
 ```
 
 ## Limiti noti

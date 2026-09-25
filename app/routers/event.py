@@ -73,6 +73,11 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
             c.to_dict() for c in db.scalars(select(GiftContribution).order_by(GiftContribution.contributed_at.desc())).all()
         ],
         "notifications": [
-            n.to_dict() for n in db.scalars(select(EventNotification).order_by(EventNotification.timestamp.desc())).all()
+            n.to_dict()
+            for n in db.scalars(
+                select(EventNotification)
+                .where(EventNotification.scheduled_at.is_(None))
+                .order_by(EventNotification.timestamp.desc())
+            ).all()
         ],
     }
