@@ -12,10 +12,11 @@ from app.main import create_app  # noqa: E402
 SEED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "event-data.json")
 
 
-def make_client(tmp_path, demo=True, admin_token="segreto-test", seed_file=SEED):
+def make_client(tmp_path, demo=True, admin_token="segreto-test", seed_file=SEED, update_gift_texts=False):
     settings = Settings(
         data_dir=str(tmp_path / "data"),
         seed_file=seed_file,
+        gift_sync_update_texts=update_gift_texts,
         seed_demo_data=demo,
         admin_token=admin_token,
         public_url="https://festa.example.org",

@@ -35,7 +35,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.event_data = load_event_file(settings.seed_file)
     with app.state.session_factory() as db:
-        seed_database(db, app.state.event_data, include_demo=settings.seed_demo_data)
+        seed_database(
+            db, app.state.event_data,
+            include_demo=settings.seed_demo_data,
+            update_gift_texts=settings.gift_sync_update_texts,
+        )
 
     app.state.push = PushService(settings.vapid_key_path, settings.vapid_subject)
 

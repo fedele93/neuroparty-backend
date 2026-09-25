@@ -1,5 +1,6 @@
 import io
 import json
+import re
 
 from PIL import Image
 
@@ -198,3 +199,88 @@ def test_new_gift_target_added_to_existing_database(tmp_path):
         assert next(t for t in targets if t["id"] == "luisi")["collectedAmount"] == luisi_before
         assert c2.get("/api/state").json()["version"] == v1 + 1  # i client ricaricano
         assert len(c2.get("/api/guests").json()) == 7  # nessun doppio seed demo
+
+
+def test_gift_texts_updated_only_with_flag(tmp_path):
+    """Cambiare titolo/IBAN di un regalo nel JSON aggiorna il DB solo con GIFT_SYNC_UPDATE_TEXTS;
+    in ogni caso la quota raccolta non viene toccata."""
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    for t in data["giftTargets"]:
+        if t["id"] == "luisi":
+            t["giftTitle"] = "Nuovo regalo di Fedele"
+            t["iban"] = "IT00 A000 0000 0000 0000 0000 000"
+            t["targetAmount"] = 1200.0
+    changed = tmp_path / "changed-event-data.json"
+    changed.write_text(json.dumps(data), encoding="utf-8")
+
+    with make_client(tmp_path) as c1:  # primo avvio con il seed originale
+        luisi = next(t for t in c1.get("/api/gifts/targets").json() if t["id"] == "luisi")
+        collected, v1 = luisi["collectedAmount"], c1.get("/api/state").json()["version"]
+
+    with make_client(tmp_path, seed_file=str(changed)) as c2:  # flag spento: nessuna modifica
+        luisi = next(t for t in c2.get("/api/gifts/targets").json() if t["id"] == "luisi")
+        assert luisi["giftTitle"] != "Nuovo regalo di Fedele"
+        assert c2.get("/api/state").json()["version"] == v1
+
+    with make_client(tmp_path, seed_file=str(changed), update_gift_texts=True) as c3:
+        luisi = next(t for t in c3.get("/api/gifts/targets").json() if t["id"] == "luisi")
+        assert luisi["giftTitle"] == "Nuovo regalo di Fedele"
+        assert luisi["iban"] == "IT00 A000 0000 0000 0000 0000 000"
+        assert luisi["targetAmount"] == 1200.0
+        assert luisi["collectedAmount"] == collected  # la quota raccolta resta
+        assert c3.get("/api/state").json()["version"] == v1 + 1
+
+    with make_client(tmp_path, seed_file=str(changed), update_gift_texts=True) as c4:
+        assert c4.get("/api/state").json()["version"] == v1 + 1  # niente da aggiornare: versione ferma
+
+
+def test_schedule_placeholders_resolved_in_event(tmp_path):
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    assert "{partyTime" in json.dumps(data)  # il JSON usa i segnaposto
+
+    with make_client(tmp_path) as c:
+        ev = c.get("/api/event").json()
+        assert ev["schedule"]["partyDate"] == "2026-11-13" and ev["schedule"]["partyTime"] == ""
+        assert not re.search(r"\{\w+", json.dumps(ev))  # nessun segnaposto nei testi serviti
+        festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
+        assert festa["timeLabel"] == "Venerdì 13 novembre - ora da definire"
+
+    data["schedule"]["partyTime"] = "20:30"
+    data["schedule"]["busDepartureTime"] = "19:15"
+    timed = tmp_path / "timed-event-data.json"
+    timed.write_text(json.dumps(data), encoding="utf-8")
+    with make_client(tmp_path / "b", seed_file=str(timed)) as c:
+        ev = c.get("/api/event").json()
+        festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
+        assert festa["timeLabel"] == "Venerdì 13 novembre - ore 20:30"
+        assert "Inizio alle ore 20:30." in festa["description"]
+        assert ev["busSchedule"]["andata"]["timeLabel"] == "Ven 13 - ore 19:15"
+        assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 20:30"
+        snap = c.get("/api/snapshot").json()
+        assert snap["event"]["schedule"]["partyTime"] == "20:30"
+
+
+def test_calendar_ics(tmp_path):
+    with make_client(tmp_path) as c:
+        r = c.get("/api/event/calendar.ics")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/calendar")
+        body = r.text
+        assert body.startswith("BEGIN:VCALENDAR") and body.rstrip().endswith("END:VCALENDAR")
+        assert body.count("BEGIN:VEVENT") == 2
+        assert "DTSTART;VALUE=DATE:20261113" in body  # senza orario: tutto il giorno
+        assert "LOCATION:Il Giardino dei Tempi - Orto Botanico\, Via Giovanni Amendola 247\, 70126 Bari" in body.replace("\r\n ", "")
+        assert "URL:https://festa.example.org" in body
+
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    data["schedule"]["partyTime"] = "20:30"
+    timed = tmp_path / "timed-event-data.json"
+    timed.write_text(json.dumps(data), encoding="utf-8")
+    with make_client(tmp_path / "b", seed_file=str(timed)) as c:
+        body = c.get("/api/event/calendar.ics").text
+        assert "DTSTART;TZID=Europe/Rome:20261113T203000" in body
+        assert "DTEND;TZID=Europe/Rome:20261114T013000" in body
+        assert "DTSTART;VALUE=DATE:20261109" in body  # la seduta resta senza orario

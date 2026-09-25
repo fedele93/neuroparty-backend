@@ -6,6 +6,7 @@ import time
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .schedule import get_schedule, resolve_placeholders
 from .state import bump_version
 from .models import (
     BusBooking,
@@ -36,13 +37,17 @@ def load_event_file(path: str) -> dict:
 
 
 def public_event_info(data: dict) -> dict:
-    """La parte 'statica' del JSON (programma, mappa, navetta...), senza i dati demo."""
+    """La parte 'statica' del JSON (programma, mappa, navetta...), senza i dati demo.
+    I segnaposto degli orari (es. {partyTime|...}) vengono risolti qui, così i client
+    ricevono testi già pronti (vedi app/schedule.py)."""
+    schedule = get_schedule(data)
     return {
         "meta": data.get("meta", EMPTY_EVENT["meta"]),
+        "schedule": schedule,
         "graduates": data.get("graduates", []),
-        "program": data.get("program", EMPTY_EVENT["program"]),
-        "busSchedule": data.get("busSchedule", EMPTY_EVENT["busSchedule"]),
-        "mapPoints": data.get("mapPoints", []),
+        "program": resolve_placeholders(data.get("program", EMPTY_EVENT["program"]), schedule),
+        "busSchedule": resolve_placeholders(data.get("busSchedule", EMPTY_EVENT["busSchedule"]), schedule),
+        "mapPoints": resolve_placeholders(data.get("mapPoints", []), schedule),
     }
 
 
@@ -50,14 +55,39 @@ def _age_ms(age_hours) -> int:
     return int(time.time() * 1000) - int(round(float(age_hours or 0) * 3600000))
 
 
-def sync_gift_targets(db: Session, data: dict, include_demo: bool) -> int:
-    """Inserisce i regali di event-data.json che mancano nel database (es. un nuovo
-    neo-specialista aggiunto dopo il primo avvio). Quelli già presenti non vengono
-    toccati, così le quote raccolte restano intatte. Ritorna quanti ne ha aggiunti."""
+# Campi "di testo" di un regalo che il JSON può aggiornare (mai collected_amount).
+GIFT_TEXT_FIELDS = {
+    "name": ("name", str), "specialization": ("specialization", str), "roleTitle": ("role_title", str),
+    "giftTitle": ("gift_title", str), "giftDescription": ("gift_description", str),
+    "targetAmount": ("target_amount", float), "iban": ("iban", str), "ibanHolder": ("iban_holder", str),
+    "satispayUrl": ("satispay_url", str), "paypalMeUrl": ("paypal_me_url", str),
+}
+
+
+def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts: bool = False) -> dict:
+    """Allinea i regali del database a event-data.json.
+    - I regali del JSON che mancano nel database vengono inseriti (es. un nuovo neo-specialista
+      aggiunto dopo il primo avvio).
+    - Con update_texts=True (variabile GIFT_SYNC_UPDATE_TEXTS) anche i regali già presenti
+      vengono aggiornati nei testi, negli IBAN/link e nell'obiettivo; la quota raccolta
+      (collected_amount) non viene mai toccata.
+    Ritorna {"added": n, "updated": n}."""
     first_fill = db.scalar(select(GiftTarget).limit(1)) is None
-    added = 0
+    added = updated = 0
     for i, t in enumerate(data.get("giftTargets", [])):
-        if db.get(GiftTarget, t["id"]) is not None:
+        existing = db.get(GiftTarget, t["id"])
+        if existing is not None:
+            if update_texts:
+                changed = False
+                for json_key, (attr, cast) in GIFT_TEXT_FIELDS.items():
+                    new_value = cast(t.get(json_key, "" if cast is str else 0))
+                    if getattr(existing, attr) != new_value:
+                        setattr(existing, attr, new_value)
+                        changed = True
+                if existing.sort_order != i:
+                    existing.sort_order = i
+                    changed = True
+                updated += int(changed)
             continue
         db.add(
             GiftTarget(
@@ -78,18 +108,19 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool) -> int:
             )
         )
         added += 1
-    if added and not first_fill:
-        bump_version(db)  # i client in polling ricaricano lo snapshot e vedono il nuovo regalo
-    if added:
+    if (added and not first_fill) or updated:
+        bump_version(db)  # i client in polling ricaricano lo snapshot e vedono le modifiche
+    if added or updated:
         db.commit()
-    return added
+    return {"added": added, "updated": updated}
 
 
-def seed_database(db: Session, data: dict, include_demo: bool) -> None:
+def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts: bool = False) -> None:
     """Popola le tabelle vuote. I regali (configurazione) vengono sempre allineati al JSON
-    (aggiunti se mancanti, anche su un database già avviato); invitati, prenotazioni,
-    auguri, foto, contributi e notifiche solo se include_demo e solo al primo avvio."""
-    sync_gift_targets(db, data, include_demo)
+    (aggiunti se mancanti, anche su un database già avviato; testi aggiornati solo con
+    update_gift_texts); invitati, prenotazioni, auguri, foto, contributi e notifiche solo se
+    include_demo e solo al primo avvio."""
+    sync_gift_targets(db, data, include_demo, update_texts=update_gift_texts)
 
     if db.get(Meta, "seeded"):
         return
