@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 PLACEHOLDER = re.compile(r"\{(\w+)(?:\|([^|}]*))?(?:\|([^}]*))?\}")
 DEFAULT_MISSING = "da definire"
 
-SCHEDULE_KEYS = ("ceremonyDate", "ceremonyTime", "partyDate", "partyTime", "busDepartureTime", "busReturnTime")
+SCHEDULE_KEYS = ("ceremonyDate", "ceremonyTime", "partyDate", "partyTime", "partyEndTime", "busDepartureTime", "busReturnTime")
 
 
 def get_schedule(data: dict) -> dict:
@@ -91,15 +91,22 @@ VTIMEZONE_ROME = [
 ]
 
 
-def _vevent(uid: str, summary: str, location: str, description: str, day: date, start: time | None, hours: int, url: str) -> list[str]:
+def _vevent(uid: str, summary: str, location: str, description: str, day: date, start: time | None, hours: int, url: str,
+            end: time | None = None) -> list[str]:
     lines = ["BEGIN:VEVENT", f"UID:{uid}", "DTSTAMP:" + datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")]
     if start is None:  # orario non ancora deciso: evento "tutto il giorno"
         lines.append("DTSTART;VALUE=DATE:" + day.strftime("%Y%m%d"))
         lines.append("DTEND;VALUE=DATE:" + (day + timedelta(days=1)).strftime("%Y%m%d"))
     else:
         begin = datetime.combine(day, start)
+        if end is not None:  # orario di fine esplicito; se è "prima" dell'inizio è il giorno dopo (es. 21:30 -> 03:00)
+            finish = datetime.combine(day, end)
+            if finish <= begin:
+                finish += timedelta(days=1)
+        else:
+            finish = begin + timedelta(hours=hours)
         lines.append("DTSTART;TZID=Europe/Rome:" + begin.strftime("%Y%m%dT%H%M%S"))
-        lines.append("DTEND;TZID=Europe/Rome:" + (begin + timedelta(hours=hours)).strftime("%Y%m%dT%H%M%S"))
+        lines.append("DTEND;TZID=Europe/Rome:" + finish.strftime("%Y%m%dT%H%M%S"))
     lines.append("SUMMARY:" + _ics_escape(summary))
     if location:
         lines.append("LOCATION:" + _ics_escape(location))
@@ -112,7 +119,7 @@ def _vevent(uid: str, summary: str, location: str, description: str, day: date, 
 
 
 def build_ics(data: dict, public_url: str = "") -> str:
-    """Due eventi: seduta (ceremonyDate/ceremonyTime) e festa (partyDate/partyTime).
+    """Due eventi: seduta (ceremonyDate/ceremonyTime) e festa (partyDate/partyTime/partyEndTime).
     Senza orario l'evento è di tutto il giorno; ricaricando il file, il calendario aggiorna
     gli eventi grazie agli UID fissi."""
     sch = get_schedule(data)
@@ -131,6 +138,6 @@ def build_ics(data: dict, public_url: str = "") -> str:
         p = points.get("festa", {})
         lines += _vevent("neuroparty-festa@neurospec", "Festa di Specializzazione in Neurologia",
                          p.get("address", ""), resolve_text(p.get("description", ""), sch),
-                         party_day, _parse_time(sch["partyTime"]), 5, public_url)
+                         party_day, _parse_time(sch["partyTime"]), 5, public_url, end=_parse_time(sch["partyEndTime"]))
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(line) for line in lines) + "\r\n"

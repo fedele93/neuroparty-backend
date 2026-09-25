@@ -242,24 +242,32 @@ def test_schedule_placeholders_resolved_in_event(tmp_path):
 
     with make_client(tmp_path) as c:
         ev = c.get("/api/event").json()
-        assert ev["schedule"]["partyDate"] == "2026-11-13" and ev["schedule"]["partyTime"] == ""
+        assert ev["schedule"]["partyDate"] == "2026-11-13"
+        assert ev["schedule"]["partyTime"] == "21:30" and ev["schedule"]["partyEndTime"] == "03:00"
+        assert ev["schedule"]["ceremonyTime"] == ""  # seduta: ora ancora da definire
         assert not re.search(r"\{\w+", json.dumps(ev))  # nessun segnaposto nei testi serviti
         festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
-        assert festa["timeLabel"] == "Venerdì 13 novembre - ora da definire"
+        assert festa["timeLabel"] == "Venerdì 13 novembre - dalle 21:30 alle 03:00"
+        assert "Dalle ore 21:30 fino alle 03:00." in festa["description"]
+        assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 21:30"
+        seduta = next(p for p in ev["mapPoints"] if p["id"] == "seduta")
+        assert seduta["timeLabel"] == "9 Novembre - ora da definire"
 
-    data["schedule"]["partyTime"] = "20:30"
+    # orari tolti/cambiati: le frasi si adattano (forma "da definire" e fine festa assente)
+    data["schedule"]["partyTime"] = ""
+    data["schedule"]["partyEndTime"] = ""
     data["schedule"]["busDepartureTime"] = "19:15"
     timed = tmp_path / "timed-event-data.json"
     timed.write_text(json.dumps(data), encoding="utf-8")
     with make_client(tmp_path / "b", seed_file=str(timed)) as c:
         ev = c.get("/api/event").json()
         festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
-        assert festa["timeLabel"] == "Venerdì 13 novembre - ore 20:30"
-        assert "Inizio alle ore 20:30." in festa["description"]
+        assert festa["timeLabel"] == "Venerdì 13 novembre - ora da definire"
+        assert "Orario da confermare." in festa["description"]
         assert ev["busSchedule"]["andata"]["timeLabel"] == "Ven 13 - ore 19:15"
-        assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 20:30"
+        assert ev["program"]["timeline"][3]["time"] == "Ven 13"
         snap = c.get("/api/snapshot").json()
-        assert snap["event"]["schedule"]["partyTime"] == "20:30"
+        assert snap["event"]["schedule"]["busDepartureTime"] == "19:15"
 
 
 def test_calendar_ics(tmp_path):
@@ -270,20 +278,24 @@ def test_calendar_ics(tmp_path):
         body = r.text
         assert body.startswith("BEGIN:VCALENDAR") and body.rstrip().endswith("END:VCALENDAR")
         assert body.count("BEGIN:VEVENT") == 2
-        assert "DTSTART;VALUE=DATE:20261113" in body  # senza orario: tutto il giorno
-        assert "LOCATION:Il Giardino dei Tempi - Orto Botanico\, Via Giovanni Amendola 247\, 70126 Bari" in body.replace("\r\n ", "")
+        assert "DTSTART;VALUE=DATE:20261109" in body  # seduta senza orario: tutto il giorno
+        assert "DTSTART;TZID=Europe/Rome:20261113T213000" in body  # festa 21:30 -> 03:00 del giorno dopo
+        assert "DTEND;TZID=Europe/Rome:20261114T030000" in body
+        assert "LOCATION:Il Giardino dei Tempi - Orto Botanico\\, Via Giovanni Amendola 247\\, 70126 Bari" in body.replace("\r\n ", "")
         assert "URL:https://festa.example.org" in body
 
     with open(SEED, encoding="utf-8") as f:
         data = json.load(f)
-    data["schedule"]["partyTime"] = "20:30"
+    data["schedule"]["partyTime"] = ""
+    data["schedule"]["partyEndTime"] = ""
+    data["schedule"]["ceremonyTime"] = "9:30"
     timed = tmp_path / "timed-event-data.json"
     timed.write_text(json.dumps(data), encoding="utf-8")
     with make_client(tmp_path / "b", seed_file=str(timed)) as c:
         body = c.get("/api/event/calendar.ics").text
-        assert "DTSTART;TZID=Europe/Rome:20261113T203000" in body
-        assert "DTEND;TZID=Europe/Rome:20261114T013000" in body
-        assert "DTSTART;VALUE=DATE:20261109" in body  # la seduta resta senza orario
+        assert "DTSTART;VALUE=DATE:20261113" in body  # festa senza orario: tutto il giorno
+        assert "DTSTART;TZID=Europe/Rome:20261109T093000" in body  # seduta con orario, durata predefinita 3 h
+        assert "DTEND;TZID=Europe/Rome:20261109T123000" in body
 
 
 def test_guests_summary(client):

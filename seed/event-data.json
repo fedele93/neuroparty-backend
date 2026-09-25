@@ -4,7 +4,8 @@
     "ceremonyDate": "2026-11-09",
     "ceremonyTime": "",
     "partyDate": "2026-11-13",
-    "partyTime": "",
+    "partyTime": "21:30",
+    "partyEndTime": "03:00",
     "busDepartureTime": "",
     "busReturnTime": ""
   },
@@ -29,7 +30,7 @@
       { "time": "{ceremonyTime|Ore $|Lun 9}", "title": "Seduta di Laurea & Proclamazione", "location": "Aula Magna \"G. De Benedictis\" - Policlinico di Bari", "details": "Discussione delle tesi e proclamazione dei 9 neo-specialisti in Neurologia. {ceremonyTime|Inizio alle ore $.|L'ora esatta della seduta sarà comunicata a breve.}", "more": true },
       { "time": "Dopo", "title": "Brindisi Accademico & Foto di Rito", "location": "Aula Magna \"G. De Benedictis\" - Policlinico di Bari", "details": "Consegna dei diplomi, corona d'alloro e foto di rito con colleghi, docenti e parenti al termine della seduta del 9 novembre.", "more": true },
       { "time": "{busDepartureTime|Ven 13 ore $|Ven 13}", "title": "Ritrovo & Imbarco Autobus Navetta", "location": "Piazzale Policlinico di Bari", "details": "Venerdì 13 novembre: ritrovo dei partecipanti e transfer riservato 54 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). {busDepartureTime|Partenza alle ore $.|Orario di partenza da definire.}", "more": true },
-      { "time": "{partyTime|Ven 13 ore $|Ven 13}", "title": "Festa di Specializzazione", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Venerdì 13 novembre al Giardino dei Tempi (Via Giovanni Amendola 247, 70126 Bari): aperitivo, cena a buffet e brindisi tutti insieme per festeggiare i 9 neo-neurologi. {partyTime|Inizio alle ore $.|L'orario sarà comunicato a breve.}", "more": true },
+      { "time": "{partyTime|Ven 13 ore $|Ven 13}", "title": "Festa di Specializzazione", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Venerdì 13 novembre al Giardino dei Tempi (Via Giovanni Amendola 247, 70126 Bari): aperitivo, cena a buffet e brindisi tutti insieme per festeggiare i 9 neo-neurologi. {partyTime|Dalle ore $|L'orario sarà comunicato a breve}{partyEndTime| fino alle $|}.", "more": true },
       { "time": "Ven 13", "title": "Taglio della Torta & Dj Set", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Taglio della torta di specializzazione, video celebrativo a sorpresa, musica e balli per chiudere in bellezza la serata.", "more": false }
     ]
   },
@@ -70,12 +71,12 @@
       "id": "festa",
       "title": "Festa di Specializzazione",
       "subtitle": "Aperitivo, Cena, Dj Set & Torta",
-      "timeLabel": "Venerdì 13 novembre - {partyTime|ore $|ora da definire}",
+      "timeLabel": "Venerdì 13 novembre - {partyTime|dalle $|ora da definire}{partyEndTime| alle $|}",
       "address": "Il Giardino dei Tempi - Orto Botanico, Via Giovanni Amendola 247, 70126 Bari",
       "latitude": 41.0985,
       "longitude": 16.8945,
       "iconType": "PARTY",
-      "description": "La festa di venerdì 13 novembre si terrà al Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari), tra il verde dell'orto botanico e le sale per eventi. {partyTime|Inizio alle ore $.|Orario da confermare.} Dress code: Elegant Chic."
+      "description": "La festa di venerdì 13 novembre si terrà al Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari), tra il verde dell'orto botanico e le sale per eventi. {partyTime|Dalle ore $|Orario da confermare}{partyEndTime| fino alle $|}. Dress code: Elegant Chic."
     }
   ],
   "guests": [
@@ -130,7 +131,7 @@
   "notifications": [
     { "title": "🎓 Benvenuti all'evento di Specializzazione!", "message": "L'app ufficiale per la Specializzazione in Neurologia a Bari è attiva. Controlla il programma, prenota il bus e conferma il tuo RSVP!", "category": "Organizzazione", "isRead": false, "ageHours": 5 },
     { "title": "📍 Seduta del 9 Novembre all'Aula Magna", "message": "La seduta di proclamazione si terrà il 9 novembre presso l'Aula Magna \"G. De Benedictis\" del Policlinico di Bari (AOUC Policlinico di Bari). Ora da definirsi.", "category": "Seduta", "isRead": false, "ageHours": 3 },
-    { "title": "🎉 Festa di Venerdì 13 Novembre", "message": "La festa di specializzazione si terrà venerdì 13 novembre al Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). L'orario sarà comunicato a breve!", "category": "Festa", "isRead": false, "ageHours": 2 },
+    { "title": "🎉 Festa di Venerdì 13 Novembre", "message": "La festa di specializzazione si terrà venerdì 13 novembre al Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, Bari), dalle 21:30 alle 03:00. Vi aspettiamo!", "category": "Festa", "isRead": false, "ageHours": 2 },
     { "title": "🚌 Prenotazione Bus Navetta Aperta", "message": "Sono disponibili 54 posti gratuiti per il transfer dal Policlinico di Bari al Giardino dei Tempi. Riserva il tuo posto!", "category": "Navetta", "isRead": false, "ageHours": 1 }
   ]
 }
