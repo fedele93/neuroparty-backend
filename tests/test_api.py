@@ -1,14 +1,15 @@
 import io
+import json
 
 from PIL import Image
 
-from conftest import ADMIN, make_client
+from conftest import ADMIN, SEED, make_client
 
 
 def test_health_and_event(client):
     assert client.get("/api/health").json() == {"status": "ok"}
     ev = client.get("/api/event").json()
-    assert len(ev["graduates"]) == 8
+    assert len(ev["graduates"]) == 9
     assert ev["meta"]["maxBusSeats"] == 54
     assert len(ev["program"]["timeline"]) == 5
 
@@ -17,9 +18,9 @@ def test_demo_seed_matches_json(client):
     snap = client.get("/api/snapshot").json()
     assert len(snap["guests"]) == 7
     assert len(snap["busBookings"]) == 3
-    assert len(snap["wishes"]) == 9
+    assert len(snap["wishes"]) == 10
     assert len(snap["photos"]) == 3
-    assert len(snap["giftTargets"]) == 9
+    assert len(snap["giftTargets"]) == 10
     assert len(snap["giftContributions"]) == 4
     assert len(snap["notifications"]) == 4
     assert snap["version"] >= 1
@@ -28,7 +29,7 @@ def test_demo_seed_matches_json(client):
 def test_empty_seed_keeps_only_gift_targets(empty_client):
     snap = empty_client.get("/api/snapshot").json()
     assert snap["guests"] == [] and snap["wishes"] == [] and snap["notifications"] == []
-    assert len(snap["giftTargets"]) == 9
+    assert len(snap["giftTargets"]) == 10
     assert all(t["collectedAmount"] == 0 for t in snap["giftTargets"])
 
 
@@ -172,3 +173,28 @@ def test_vapid_keys_persist_across_restarts(tmp_path):
         # anche il DB persiste (nessun doppio seed)
         assert len(c2.get("/api/guests").json()) == 7
     assert k1 == k2
+
+
+def test_new_gift_target_added_to_existing_database(tmp_path):
+    """Un neo-specialista aggiunto a event-data.json dopo il primo avvio deve comparire
+    fra i regali al riavvio, senza toccare le quote già raccolte dagli altri."""
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    reduced = dict(data, giftTargets=[t for t in data["giftTargets"] if t["id"] != "regina"])
+    old_seed = tmp_path / "old-event-data.json"
+    old_seed.write_text(json.dumps(reduced), encoding="utf-8")
+
+    with make_client(tmp_path, seed_file=str(old_seed)) as c1:
+        assert [t["id"] for t in c1.get("/api/gifts/targets").json()].count("regina") == 0
+        c1.post("/api/gifts/contributions", json={"targetGraduateId": "luisi", "amount": 30, "donorName": "Zia"})
+        luisi_before = next(t for t in c1.get("/api/gifts/targets").json() if t["id"] == "luisi")["collectedAmount"]
+        v1 = c1.get("/api/state").json()["version"]
+
+    with make_client(tmp_path) as c2:  # riavvio con il JSON completo (10 regali)
+        targets = c2.get("/api/gifts/targets").json()
+        regina = next(t for t in targets if t["id"] == "regina")
+        assert regina["collectedAmount"] == 0 and regina["name"] == "Dott. Donato Regina"
+        assert targets[-1]["id"] == "regina"  # rispetta l'ordine del JSON
+        assert next(t for t in targets if t["id"] == "luisi")["collectedAmount"] == luisi_before
+        assert c2.get("/api/state").json()["version"] == v1 + 1  # i client ricaricano
+        assert len(c2.get("/api/guests").json()) == 7  # nessun doppio seed demo

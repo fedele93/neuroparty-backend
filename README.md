@@ -138,6 +138,11 @@ la PWA legge questi dati dal server, quindi date e luoghi si aggiornano senza ri
 nulla. Tieni allineata la copia in `spec2026app/pwa/shared/event-data.json`, usata come
 fallback offline e per generare i dati dell'app Android.
 
+I regali (`giftTargets`) vivono invece nel database: al riavvio il server aggiunge quelli
+presenti nel JSON ma non ancora nel database (per esempio un neo-specialista aggiunto dopo il
+primo avvio) senza toccare le quote già raccolte; per cambiare testi o IBAN di un regalo già
+esistente va modificato il record nel database (o si riparte da una cartella `data/` vuota).
+
 > Attenzione: gli IBAN e i link di pagamento nel file di esempio sono segnaposto.
 
 ## Sviluppo locale
@@ -164,7 +169,7 @@ app/
   push.py          Web Push (VAPID)
   routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event
 seed/event-data.json
-tests/             pytest (13 test)
+tests/             pytest (14 test)
 Dockerfile, docker-compose.yml, Caddyfile
 scripts/           install-ubuntu.sh, update.sh, send-notification.sh
 ```

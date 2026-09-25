@@ -6,6 +6,7 @@ import time
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .state import bump_version
 from .models import (
     BusBooking,
     EventNotification,
@@ -49,31 +50,49 @@ def _age_ms(age_hours) -> int:
     return int(time.time() * 1000) - int(round(float(age_hours or 0) * 3600000))
 
 
+def sync_gift_targets(db: Session, data: dict, include_demo: bool) -> int:
+    """Inserisce i regali di event-data.json che mancano nel database (es. un nuovo
+    neo-specialista aggiunto dopo il primo avvio). Quelli già presenti non vengono
+    toccati, così le quote raccolte restano intatte. Ritorna quanti ne ha aggiunti."""
+    first_fill = db.scalar(select(GiftTarget).limit(1)) is None
+    added = 0
+    for i, t in enumerate(data.get("giftTargets", [])):
+        if db.get(GiftTarget, t["id"]) is not None:
+            continue
+        db.add(
+            GiftTarget(
+                id=t["id"],
+                name=t.get("name", ""),
+                specialization=t.get("specialization", ""),
+                role_title=t.get("roleTitle", ""),
+                gift_title=t.get("giftTitle", ""),
+                gift_description=t.get("giftDescription", ""),
+                target_amount=float(t.get("targetAmount", 0)),
+                # importi demo solo quando si popola da zero con i dati finti
+                collected_amount=float(t.get("collectedAmount", 0)) if (include_demo and first_fill) else 0.0,
+                iban=t.get("iban", ""),
+                iban_holder=t.get("ibanHolder", ""),
+                satispay_url=t.get("satispayUrl", ""),
+                paypal_me_url=t.get("paypalMeUrl", ""),
+                sort_order=i,
+            )
+        )
+        added += 1
+    if added and not first_fill:
+        bump_version(db)  # i client in polling ricaricano lo snapshot e vedono il nuovo regalo
+    if added:
+        db.commit()
+    return added
+
+
 def seed_database(db: Session, data: dict, include_demo: bool) -> None:
-    """Popola le tabelle vuote. I regali (configurazione) vengono sempre inseriti;
-    invitati, prenotazioni, auguri, foto, contributi e notifiche solo se include_demo."""
+    """Popola le tabelle vuote. I regali (configurazione) vengono sempre allineati al JSON
+    (aggiunti se mancanti, anche su un database già avviato); invitati, prenotazioni,
+    auguri, foto, contributi e notifiche solo se include_demo e solo al primo avvio."""
+    sync_gift_targets(db, data, include_demo)
+
     if db.get(Meta, "seeded"):
         return
-
-    if db.scalar(select(GiftTarget).limit(1)) is None:
-        for i, t in enumerate(data.get("giftTargets", [])):
-            db.add(
-                GiftTarget(
-                    id=t["id"],
-                    name=t.get("name", ""),
-                    specialization=t.get("specialization", ""),
-                    role_title=t.get("roleTitle", ""),
-                    gift_title=t.get("giftTitle", ""),
-                    gift_description=t.get("giftDescription", ""),
-                    target_amount=float(t.get("targetAmount", 0)),
-                    collected_amount=float(t.get("collectedAmount", 0)) if include_demo else 0.0,
-                    iban=t.get("iban", ""),
-                    iban_holder=t.get("ibanHolder", ""),
-                    satispay_url=t.get("satispayUrl", ""),
-                    paypal_me_url=t.get("paypalMeUrl", ""),
-                    sort_order=i,
-                )
-            )
 
     if include_demo:
         for g in data.get("guests", []):
