@@ -181,8 +181,8 @@ fallback offline e per generare i dati dell'app Android.
 ### Orari ancora da decidere
 
 Il blocco `schedule` del JSON contiene le date (`ceremonyDate`, `partyDate`) e gli orari
-(`ceremonyTime`, `partyTime`, `busDepartureTime`, `busReturnTime`, formato `HH:MM`, vuoto =
-da definire). Nei testi si usano segnaposto risolti dal server (e dalla PWA/app in locale):
+(`ceremonyTime`, `partyTime`, `partyEndTime`, `busDepartureTime`, `busReturnTime`, formato
+`HH:MM`, vuoto = da definire; la festa è già impostata 21:30-03:00). Nei testi si usano segnaposto risolti dal server (e dalla PWA/app in locale):
 
 | Sintassi | Risultato |
 |---|---|
