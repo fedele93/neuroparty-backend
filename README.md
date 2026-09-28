@@ -24,6 +24,7 @@ arrivano davvero a tutti.
 | Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
 | Export CSV per ristorante e autista | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori) |
 | Sottoscrizione push del browser | `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` |
+| Automazioni con **n8n**: report pronto per mail (JSON/testo/HTML), stato dei webhook, test | `GET /api/automation/report[.txt|.html]`, `GET /api/automation/status`, `POST /api/automation/webhook-test` (token automazioni o organizzatori) |
 | Sincronizzazione app Android in una chiamata | `GET /api/snapshot`, `GET /api/state` |
 
 Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
@@ -33,6 +34,8 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
   prenotazione può modificarlo o cancellarlo;
 - gli organizzatori usano `X-Admin-Token` (valore di `ADMIN_TOKEN` nel `.env`): possono inviare
   notifiche push e cancellare qualsiasi record;
+- le automazioni (n8n) usano `X-Automation-Token` (`AUTOMATION_TOKEN`): sola lettura su report,
+  riepiloghi ed export CSV;
 - cambiare lo stato RSVP di un invitato è permesso a tutti.
 
 ## Stack
@@ -40,6 +43,7 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
 - Python 3.12, [FastAPI](https://fastapi.tiangolo.com/), SQLAlchemy, SQLite (file su volume)
 - [pywebpush](https://github.com/web-push-libs/pywebpush) per le notifiche Web Push (chiavi VAPID generate al primo avvio)
 - Pillow per ridimensionare le foto
+- httpx per i webhook verso [n8n](https://n8n.io/) (vedi *Automazioni con n8n*)
 - Docker Compose + [Caddy](https://caddyserver.com/) (HTTPS automatico con Let's Encrypt)
 
 ## Deploy su Ubuntu con Docker e sottodominio
@@ -91,6 +95,7 @@ nano .env
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/obiettivo dei regali già in database dal JSON al riavvio (quote raccolte intatte); di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
+| `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `N8N_WEBHOOK_EVENTS`, `AUTOMATION_TOKEN` | opzionali, per collegare n8n (vedi *Automazioni con n8n*) |
 
 ### 4. Avvio
 
@@ -170,6 +175,58 @@ all'ora indicata da un controllo in background (ogni `SCHEDULER_INTERVAL_S` seco
 ./scripts/send-notification.sh "🚌 Partenza navetta" "Partiamo tra 15 minuti dal Piazzale" Navetta
 ```
 
+## Automazioni con n8n
+
+Se sul server c'è già [n8n](https://n8n.io/) in self-hosting, il backend può collegarsi in due
+direzioni, senza toccare la configurazione di Caddy (tutti gli endpoint nuovi sono sotto `/api/`,
+già inoltrato al container `api`):
+
+1. **n8n legge dal backend** (per report periodici): con il token di sola lettura
+   `AUTOMATION_TOKEN` (header `X-Automation-Token`) n8n può chiamare
+   - `GET /api/automation/report` — JSON completo: coperti confermati e menu speciali, posti
+     navetta per fermata, quote regalo per neo-specialista, novità nelle ultime `sinceHours` ore
+     (default 24: nuovi RSVP, prenotazioni, quote, auguri, foto), notifiche programmate;
+   - `GET /api/automation/report.txt` e `.html` — lo stesso report già impaginato, da incollare
+     nel corpo di una mail (o di un messaggio Telegram);
+   - `GET /api/export/guests.csv`, `GET /api/export/bus.csv` — i CSV, per allegarli.
+
+   Per **inviare notifiche push** da n8n (es. promemoria automatico la sera prima) si usa il
+   normale `POST /api/notifications` con `X-Admin-Token`.
+
+2. **Il backend avvisa n8n** (webhook in uscita): impostando `N8N_WEBHOOK_URL` all'URL di un nodo
+   *Webhook* di n8n, ogni evento rilevante viene inviato come POST JSON
+   `{"event": "bus.booked", "timestamp": ..., "data": {...}}`. Eventi: `guest.created`,
+   `guest.updated`, `guest.deleted`, `bus.booked`, `bus.cancelled`, `wish.created`,
+   `photo.uploaded`, `gift.contributed`, `notification.scheduled`, `notification.published`,
+   `test`. L'invio avviene in un thread separato con tentativi ripetuti: se n8n è spento
+   l'app continua a funzionare e nel log compare un avviso. `N8N_WEBHOOK_EVENTS` filtra gli
+   eventi (`guest.*,bus.booked`); `N8N_WEBHOOK_SECRET` viene inviato nell'header
+   `X-Automation-Secret` (da verificare in n8n con *Header Auth*) e usato per la firma HMAC
+   `X-NeuroParty-Signature`.
+
+Configurazione:
+
+```bash
+# nel .env del backend
+AUTOMATION_TOKEN=$(openssl rand -hex 24)
+N8N_WEBHOOK_URL=https://n8n.tuodominio.it/webhook/neuroparty   # URL di produzione del nodo Webhook
+N8N_WEBHOOK_SECRET=$(openssl rand -hex 24)
+docker compose -f docker-compose.prod.yml up -d                # riavvia per applicare
+./scripts/n8n-test-webhook.sh                                  # invia un evento "test" e mostra l'esito
+```
+
+Indirizzi interni: se n8n e `neuroparty-api` sono sulla stessa rete Docker (`proxy_network` del
+Caddy condiviso), le chiamate possono restare dentro al server senza passare da Caddy:
+`N8N_WEBHOOK_URL=http://<nome-container-n8n>:5678/webhook/neuroparty` e, in n8n,
+`http://neuroparty-api:8000/api/automation/report`. Gli URL pubblici funzionano comunque.
+
+`GET /api/automation/status` mostra la configurazione attiva (URL mascherato, filtro eventi,
+contatori di invii riusciti/falliti, ultimo esito) e il catalogo degli eventi.
+
+Nella cartella [`n8n/`](n8n/README.md) ci sono due workflow pronti da importare: **report
+giornaliero via mail** (Schedule → HTTP Request → Send Email) e **avvisi in tempo reale**
+(Webhook → Code → Send Email), con le istruzioni per compilarli.
+
 ## Dati dell'evento
 
 `seed/event-data.json` contiene programma, mappa, orari navetta, laureandi e la lista dei
@@ -227,16 +284,19 @@ app/
   config.py        variabili d'ambiente
   models.py        tabelle (stesse entità dell'app Android)
   schemas.py       validazione input
-  auth.py          X-Admin-Token / X-Client-Id
+  auth.py          X-Admin-Token / X-Client-Id / X-Automation-Token
   push.py          Web Push (VAPID)
   schedule.py      orari (blocco "schedule"), segnaposto nei testi, calendario .ics
   scheduler.py     pubblicazione delle notifiche programmate (ciclo in background)
+  webhooks.py      webhook in uscita verso n8n (eventi, firma HMAC, tentativi ripetuti)
+  report.py        report per gli organizzatori (JSON, testo, HTML) usato da n8n
   validation.py    controllo IBAN (segnalazione dei segnaposto)
-  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event, export
+  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event, export, automation
 seed/event-data.json
-tests/             pytest (22 test)
+n8n/               workflow n8n di esempio (report via mail, avvisi in tempo reale) + guida
+tests/             pytest (30 test)
 Dockerfile, docker-compose.yml, Caddyfile
-scripts/           install-ubuntu.sh, update.sh, send-notification.sh, backup.sh, install-backup-cron.sh
+scripts/           install-ubuntu.sh, update.sh, send-notification.sh, n8n-test-webhook.sh, backup.sh, install-backup-cron.sh
 ```
 
 ## Limiti noti

@@ -1,0 +1,52 @@
+{
+  "name": "NeuroParty - Avvisi in tempo reale (webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "neuroparty",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "5f1a2b3c-0002-4000-8000-000000000001",
+      "name": "Webhook NeuroParty",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "9c6a3d2e-7b41-4f0a-9e2d-3b5a1c7e8f02",
+      "notes": "URL di produzione: https://<tuo-n8n>/webhook/neuroparty -> va in N8N_WEBHOOK_URL nel .env del backend. Consigliato: Authentication = Header Auth con nome X-Automation-Secret e valore = N8N_WEBHOOK_SECRET."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Trasforma l'evento inviato dal backend NeuroParty in oggetto + testo per la mail.\n// Struttura in ingresso: { event, timestamp, source, data } (vedi README del backend).\nconst b = $input.first().json.body;\nconst d = b.data || {};\nconst eur = (n) => Number(n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });\nconst rsvp = { CONFIRMED: 'confermato', PENDING: 'in attesa', DECLINED: 'declinato' };\nlet subject = null;\nlet text = '';\n\nswitch (b.event) {\n  case 'guest.created': {\n    const g = d.guest, s = d.summary || {};\n    subject = `Nuovo RSVP: ${g.fullName} (${g.guestsCount} pers., ${rsvp[g.rsvpStatus] || g.rsvpStatus})`;\n    text = `${g.fullName} - ${g.category}\\nStato: ${rsvp[g.rsvpStatus] || g.rsvpStatus}, persone: ${g.guestsCount}\\nEsigenze alimentari: ${g.dietaryNotes || '-'}\\nContatto: ${g.contactInfo || '-'}\\n\\nCoperti confermati finora: ${s.covers} (${s.pendingCovers} in attesa)`;\n    break;\n  }\n  case 'guest.updated': {\n    const g = d.guest, s = d.summary || {};\n    if (!d.changes || !('rsvpStatus' in d.changes)) return []; // solo i cambi di stato RSVP\n    subject = `RSVP aggiornato: ${g.fullName} -> ${rsvp[g.rsvpStatus] || g.rsvpStatus}`;\n    text = `${g.fullName} ora e' ${rsvp[g.rsvpStatus] || g.rsvpStatus} (${g.guestsCount} pers.).\\n\\nCoperti confermati finora: ${s.covers} (${s.pendingCovers} in attesa)`;\n    break;\n  }\n  case 'bus.booked': {\n    const k = d.booking, bus = d.bus || {};\n    subject = `Navetta: ${k.passengerName} ha prenotato ${k.seatsCount} posti`;\n    text = `${k.passengerName} - ${k.seatsCount} posti\\nFermata: ${k.pickupStop || '-'}\\nRitorno: ${k.returnTripWanted ? 'si' : 'no'}\\nTelefono: ${k.contactPhone || '-'}\\nNote: ${k.notes || '-'}\\n\\nPosti prenotati: ${bus.bookedSeats}/${bus.maxSeats} (liberi ${bus.availableSeats})`;\n    break;\n  }\n  case 'gift.contributed': {\n    const c = d.contribution, t = d.target || {};\n    subject = `Regalo: ${eur(c.amount)} da ${c.donorName} per ${c.targetGraduateName}`;\n    text = `${c.donorName} ha contribuito con ${eur(c.amount)} (${c.paymentMethod}) per ${c.targetGraduateName}.\\nNota: ${c.note || '-'}\\n\\nRaccolti finora: ${eur(t.collectedAmount)} su ${eur(t.targetAmount)}`;\n    break;\n  }\n  case 'test':\n    subject = 'Test collegamento n8n riuscito';\n    text = d.message || 'ok';\n    break;\n  default:\n    return []; // wish.created, photo.uploaded, notification.*: nessuna mail\n}\n\nreturn [{ json: { event: b.event, subject, text, raw: b } }];"
+      },
+      "id": "5f1a2b3c-0002-4000-8000-000000000002",
+      "name": "Prepara messaggio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "neuroparty@example.org",
+        "toEmail": "organizzatori@example.org",
+        "subject": "=NeuroParty - {{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "5f1a2b3c-0002-4000-8000-000000000003",
+      "name": "Invia mail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [440, 0],
+      "notes": "Seleziona le credenziali SMTP. In alternativa sostituisci questo nodo con Telegram / Signal / Google Sheets: i campi $json.subject e $json.text sono gia' pronti."
+    }
+  ],
+  "connections": {
+    "Webhook NeuroParty": { "main": [[{ "node": "Prepara messaggio", "type": "main", "index": 0 }]] },
+    "Prepara messaggio": { "main": [[{ "node": "Invia mail", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Rome" },
+  "active": false
+}

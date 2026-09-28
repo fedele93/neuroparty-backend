@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -56,8 +56,20 @@ def summary(db: Session = Depends(get_db)):
     return guests_summary(db.scalars(select(Guest)).all())
 
 
+def _emit(request: Request, event: str, guest: dict, db: Session, **extra) -> None:
+    """Webhook verso n8n con il record e il riepilogo aggiornato dei coperti."""
+    request.app.state.webhooks.emit(
+        event, {"guest": guest, "summary": guests_summary(db.scalars(select(Guest)).all()), **extra}
+    )
+
+
 @router.post("", status_code=201)
-def create_guest(body: GuestIn, db: Session = Depends(get_db), client_id: str | None = Depends(get_client_id)):
+def create_guest(
+    body: GuestIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    client_id: str | None = Depends(get_client_id),
+):
     guest = Guest(
         full_name=body.fullName,
         category=body.category or "Invitato",
@@ -71,6 +83,7 @@ def create_guest(body: GuestIn, db: Session = Depends(get_db), client_id: str | 
     bump_version(db)
     db.commit()
     db.refresh(guest)
+    _emit(request, "guest.created", guest.to_dict(), db)
     return guest.to_dict()
 
 
@@ -78,6 +91,7 @@ def create_guest(body: GuestIn, db: Session = Depends(get_db), client_id: str | 
 def update_guest(
     guest_id: int,
     body: GuestUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
     admin: bool = Depends(is_admin),
@@ -107,12 +121,14 @@ def update_guest(
     bump_version(db)
     db.commit()
     db.refresh(guest)
+    _emit(request, "guest.updated", guest.to_dict(), db, changes=changes)
     return guest.to_dict()
 
 
 @router.delete("/{guest_id}", status_code=204)
 def delete_guest(
     guest_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
     admin: bool = Depends(is_admin),
@@ -122,7 +138,9 @@ def delete_guest(
         raise HTTPException(404, "Invitato non trovato")
     if not can_modify(guest.owner_client_id, admin, client_id):
         raise HTTPException(403, "Solo chi ha inserito l'invitato o un organizzatore può rimuoverlo")
+    snapshot = guest.to_dict()
     db.delete(guest)
     bump_version(db)
     db.commit()
+    _emit(request, "guest.deleted", snapshot, db)
     return None

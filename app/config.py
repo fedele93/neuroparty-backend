@@ -37,6 +37,20 @@ class Settings:
         default_factory=lambda: int(os.environ["MAX_BUS_SEATS"]) if os.environ.get("MAX_BUS_SEATS") else None
     )
 
+    # ---- Automazioni (n8n) -----------------------------------------------------------
+    # URL del nodo "Webhook" di n8n a cui inviare gli eventi (nuovo RSVP, prenotazione navetta, ...).
+    # Vuoto = webhook disabilitati. Vedi app/webhooks.py e la sezione "Automazioni con n8n" del README.
+    n8n_webhook_url: str = field(default_factory=lambda: os.environ.get("N8N_WEBHOOK_URL", "").strip())
+    # Segreto condiviso inviato nell'header X-Automation-Secret (e usato per la firma HMAC).
+    n8n_webhook_secret: str = field(default_factory=lambda: os.environ.get("N8N_WEBHOOK_SECRET", ""))
+    # Eventi da inviare: "*" = tutti, oppure lista separata da virgole con jolly (es. "guest.*,bus.booked").
+    n8n_webhook_events: str = field(default_factory=lambda: os.environ.get("N8N_WEBHOOK_EVENTS", "*"))
+    # Timeout (secondi) di ogni chiamata verso n8n.
+    n8n_webhook_timeout_s: float = field(default_factory=lambda: float(os.environ.get("N8N_WEBHOOK_TIMEOUT_S", "10")))
+    # Token di sola lettura per n8n (header X-Automation-Token): report, riepiloghi ed export CSV,
+    # senza dare a n8n il token organizzatore. Vuoto = si usa solo ADMIN_TOKEN.
+    automation_token: str = field(default_factory=lambda: os.environ.get("AUTOMATION_TOKEN", ""))
+
     @property
     def db_path(self) -> str:
         return os.path.join(self.data_dir, "neuroparty.db")

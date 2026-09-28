@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,7 @@ def list_contributions(db: Session = Depends(get_db)):
 
 
 @router.post("/contributions", status_code=201)
-def add_contribution(body: ContributionIn, db: Session = Depends(get_db)):
+def add_contribution(body: ContributionIn, request: Request, db: Session = Depends(get_db)):
     target = db.get(GiftTarget, body.targetGraduateId)
     if target is None:
         raise HTTPException(404, "Destinatario del regalo non trovato")
@@ -42,4 +42,6 @@ def add_contribution(body: ContributionIn, db: Session = Depends(get_db)):
     bump_version(db)
     db.commit()
     db.refresh(contribution)
-    return {"contribution": contribution.to_dict(), "target": target.to_dict()}
+    result = {"contribution": contribution.to_dict(), "target": target.to_dict()}
+    request.app.state.webhooks.emit("gift.contributed", result)
+    return result

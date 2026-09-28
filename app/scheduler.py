@@ -19,7 +19,7 @@ log = logging.getLogger("neuroparty.scheduler")
 IMMEDIATE_THRESHOLD_MS = 30_000
 
 
-def publish_due_notifications(session_factory, push, now: int | None = None) -> list[dict]:
+def publish_due_notifications(session_factory, push, now: int | None = None, webhooks=None) -> list[dict]:
     """Pubblica e invia in push tutte le notifiche programmate con scheduled_at <= now."""
     now = now if now is not None else now_ms()
     published: list[EventNotification] = []
@@ -43,6 +43,8 @@ def publish_due_notifications(session_factory, push, now: int | None = None) -> 
             push.broadcast(session_factory, n["title"], n["message"], n["category"], n["id"])
         except Exception:  # noqa: BLE001 - un errore push non deve fermare le altre
             log.exception("Broadcast della notifica programmata #%s fallito", n["id"])
+        if webhooks is not None:
+            webhooks.emit("notification.published", {"notification": n, "scheduled": True})
     log.info("Pubblicate %d notifiche programmate", len(result))
     return result
 
@@ -51,7 +53,9 @@ async def run_scheduler(app, interval_s: float) -> None:
     """Ciclo in background: controlla le notifiche in scadenza ogni interval_s secondi."""
     while True:
         try:
-            await asyncio.to_thread(publish_due_notifications, app.state.session_factory, app.state.push)
+            await asyncio.to_thread(
+                publish_due_notifications, app.state.session_factory, app.state.push, None, app.state.webhooks
+            )
         except Exception:  # noqa: BLE001
             log.exception("Errore nello scheduler delle notifiche")
         await asyncio.sleep(interval_s)
