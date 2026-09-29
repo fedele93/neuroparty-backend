@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ def list_wishes(db: Session = Depends(get_db)):
 
 
 @router.post("", status_code=201)
-def create_wish(body: WishIn, db: Session = Depends(get_db)):
+def create_wish(body: WishIn, request: Request, db: Session = Depends(get_db)):
     wish = Wish(
         author_name=body.authorName,
         target_graduate=body.targetGraduate or "Tutti i Laureandi",
@@ -30,6 +30,7 @@ def create_wish(body: WishIn, db: Session = Depends(get_db)):
     bump_version(db)
     db.commit()
     db.refresh(wish)
+    request.app.state.webhooks.emit("wish.created", {"wish": wish.to_dict()})
     return wish.to_dict()
 
 

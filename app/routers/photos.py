@@ -57,6 +57,7 @@ async def upload_photo(
     bump_version(db)
     db.commit()
     db.refresh(photo)
+    request.app.state.webhooks.emit("photo.uploaded", {"photo": photo.to_dict(base_url_for(request))})
     return photo.to_dict(base_url_for(request))
 
 

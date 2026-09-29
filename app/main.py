@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings
 from .db import ensure_schema, make_engine, make_session_factory
 from .push import PushService
-from .routers import bus, event, export, gifts, guests, notifications, photos, push, wishes
+from .routers import automation, bus, event, export, gifts, guests, notifications, photos, push, wishes
 from .scheduler import run_scheduler
 from .seed import load_event_file, seed_database
 from .validation import placeholder_gift_issues
+from .webhooks import WebhookDispatcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("neuroparty")
@@ -35,10 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+            app.state.webhooks.close()
 
     app = FastAPI(
         title="NeuroParty API",
-        version="1.1.0",
+        version="1.2.0",
         description="Backend condiviso per l'app Android e la PWA della festa di specializzazione in Neurologia.",
         lifespan=lifespan,
     )
@@ -60,6 +62,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.push = PushService(settings.vapid_key_path, settings.vapid_subject)
 
+    # Webhook verso n8n (vedi app/webhooks.py): disabilitati se N8N_WEBHOOK_URL è vuoto.
+    app.state.webhooks = WebhookDispatcher(
+        settings.n8n_webhook_url, settings.n8n_webhook_secret,
+        settings.n8n_webhook_events, settings.n8n_webhook_timeout_s,
+    )
+    if app.state.webhooks.enabled:
+        log.info("Webhook n8n attivi verso %s (eventi: %s)", app.state.webhooks.status()["url"], ",".join(app.state.webhooks.patterns))
+        if not settings.n8n_webhook_secret:
+            log.warning("N8N_WEBHOOK_SECRET non impostato: n8n non potrà verificare che le chiamate arrivino da questo server")
+
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or ["*"]
     app.add_middleware(
         CORSMiddleware,
@@ -69,7 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export):
+    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation):
         app.include_router(r.router)
 
     # Foto caricate dagli invitati

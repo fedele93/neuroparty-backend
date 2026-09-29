@@ -57,6 +57,7 @@ def send_notification(
         db.add(notif)
         db.commit()  # nessun bump di versione: per gli invitati non è ancora successo nulla
         db.refresh(notif)
+        request.app.state.webhooks.emit("notification.scheduled", {"notification": notif.to_dict()})
         return notif.to_dict()
 
     notif = EventNotification(title=body.title, message=body.message, category=body.category)
@@ -68,6 +69,7 @@ def send_notification(
     background.add_task(
         push.broadcast, request.app.state.session_factory, notif.title, notif.message, notif.category, notif.id
     )
+    request.app.state.webhooks.emit("notification.published", {"notification": notif.to_dict(), "scheduled": False})
     return notif.to_dict()
 
 

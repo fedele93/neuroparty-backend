@@ -1,7 +1,7 @@
 """Esportazione CSV per gli organizzatori (lista per il ristorante e per l'autista).
 
-Richiede X-Admin-Token. Il CSV usa ";" come separatore e il BOM UTF-8, così Excel italiano
-lo apre correttamente con un doppio clic.
+Richiede X-Admin-Token oppure X-Automation-Token (per n8n, es. CSV allegato a una mail).
+Il CSV usa ";" come separatore e il BOM UTF-8, così Excel italiano lo apre con un doppio clic.
 """
 import csv
 import io
@@ -12,11 +12,11 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin
+from ..auth import require_automation
 from ..deps import get_db
 from ..models import BusBooking, Guest
 
-router = APIRouter(prefix="/api/export", tags=["export"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/export", tags=["export"], dependencies=[Depends(require_automation)])
 
 RSVP_LABELS = {"CONFIRMED": "Confermato", "PENDING": "In attesa", "DECLINED": "Declinato"}
 

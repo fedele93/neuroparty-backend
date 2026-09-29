@@ -1,0 +1,88 @@
+{
+  "name": "NeuroParty - Report giornaliero via mail",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 8 * * *" }
+          ]
+        }
+      },
+      "id": "5f1a2b3c-0001-4000-8000-000000000001",
+      "name": "Ogni mattina alle 8",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "baseUrl", "value": "https://neurospec.peukeia.eu", "type": "string" },
+            { "id": "a2", "name": "automationToken", "value": "INCOLLA-QUI-AUTOMATION_TOKEN", "type": "string" },
+            { "id": "a3", "name": "destinatari", "value": "organizzatori@example.org", "type": "string" },
+            { "id": "a4", "name": "oreNovita", "value": "24", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5f1a2b3c-0001-4000-8000-000000000002",
+      "name": "Impostazioni",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0],
+      "notes": "baseUrl: indirizzo dell'app (dallo stesso server puoi usare http://neuroparty-api:8000). automationToken: valore di AUTOMATION_TOKEN nel .env del backend."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.baseUrl }}/api/automation/report.html",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "sinceHours", "value": "={{ $json.oreNovita }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Automation-Token", "value": "={{ $json.automationToken }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": { "responseFormat": "text" }
+          }
+        }
+      },
+      "id": "5f1a2b3c-0001-4000-8000-000000000003",
+      "name": "Scarica report HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "neuroparty@example.org",
+        "toEmail": "={{ $('Impostazioni').item.json.destinatari }}",
+        "subject": "=NeuroParty - report del {{ $now.setZone('Europe/Rome').toFormat('dd/MM/yyyy') }}",
+        "emailFormat": "html",
+        "html": "={{ $json.data }}",
+        "options": {}
+      },
+      "id": "5f1a2b3c-0001-4000-8000-000000000004",
+      "name": "Invia mail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [660, 0],
+      "notes": "Seleziona (o crea) le credenziali SMTP del tuo provider di posta."
+    }
+  ],
+  "connections": {
+    "Ogni mattina alle 8": { "main": [[{ "node": "Impostazioni", "type": "main", "index": 0 }]] },
+    "Impostazioni": { "main": [[{ "node": "Scarica report HTML", "type": "main", "index": 0 }]] },
+    "Scarica report HTML": { "main": [[{ "node": "Invia mail", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Rome" },
+  "active": false
+}

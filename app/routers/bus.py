@@ -22,11 +22,15 @@ def booked_seats(db: Session) -> int:
     return int(db.scalar(select(func.coalesce(func.sum(BusBooking.seats_count), 0))) or 0)
 
 
-@router.get("/summary")
-def summary(request: Request, db: Session = Depends(get_db)):
+def bus_summary(request: Request, db: Session) -> dict:
     total = max_seats(request)
     booked = booked_seats(db)
     return {"maxSeats": total, "bookedSeats": booked, "availableSeats": max(0, total - booked)}
+
+
+@router.get("/summary")
+def summary(request: Request, db: Session = Depends(get_db)):
+    return bus_summary(request, db)
 
 
 @router.get("/bookings")
@@ -61,12 +65,14 @@ def create_booking(
     bump_version(db)
     db.commit()
     db.refresh(booking)
+    request.app.state.webhooks.emit("bus.booked", {"booking": booking.to_dict(), "bus": bus_summary(request, db)})
     return booking.to_dict()
 
 
 @router.delete("/bookings/{booking_id}", status_code=204)
 def delete_booking(
     booking_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
     admin: bool = Depends(is_admin),
@@ -76,7 +82,9 @@ def delete_booking(
         raise HTTPException(404, "Prenotazione non trovata")
     if not can_modify(booking.owner_client_id, admin, client_id):
         raise HTTPException(403, "Solo chi ha prenotato o un organizzatore può cancellare la prenotazione")
+    snapshot = booking.to_dict()
     db.delete(booking)
     bump_version(db)
     db.commit()
+    request.app.state.webhooks.emit("bus.cancelled", {"booking": snapshot, "bus": bus_summary(request, db)})
     return None
