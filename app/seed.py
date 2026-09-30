@@ -11,7 +11,8 @@ from .state import bump_version
 from .models import (
     BusBooking,
     EventNotification,
-    GiftContribution,
+    GiftPoolAllocation,
+    GiftPoolContribution,
     GiftTarget,
     Guest,
     Meta,
@@ -25,7 +26,29 @@ EMPTY_EVENT = {
     "program": {"badge": "", "title": "", "subtitle": "", "dateLabel": "", "locationLabel": "", "timeline": []},
     "busSchedule": {"subtitle": "", "andata": {}, "ritorno": {}, "pickupStops": []},
     "mapPoints": [],
+    "giftCollector": {},
 }
+
+# Cassiere delle quote uniche: chi non vuole fare un bonifico per ogni neo-specialista versa
+# a lui una cifra sola, che poi ripartisce. Metodi ammessi: bonifico, PayPal e contanti.
+COLLECTOR_DEFAULTS = {
+    "name": "",
+    "roleTitle": "Cassiere delle quote uniche",
+    "description": "",
+    "iban": "",
+    "ibanHolder": "",
+    "paypalMeUrl": "",
+    "paymentMethods": ["IBAN", "PayPal", "Contanti"],
+    "transferReason": "Regalo specializzazione Neurologia",
+}
+
+
+def gift_collector_info(data: dict) -> dict:
+    """Blocco "giftCollector" del JSON completato con i valori di default."""
+    info = dict(COLLECTOR_DEFAULTS)
+    info.update({k: v for k, v in (data.get("giftCollector") or {}).items() if v is not None})
+    info["paymentMethods"] = [m for m in info["paymentMethods"] if m in ("IBAN", "PayPal", "Contanti")]
+    return info
 
 
 def load_event_file(path: str) -> dict:
@@ -48,6 +71,7 @@ def public_event_info(data: dict) -> dict:
         "program": resolve_placeholders(data.get("program", EMPTY_EVENT["program"]), schedule),
         "busSchedule": resolve_placeholders(data.get("busSchedule", EMPTY_EVENT["busSchedule"]), schedule),
         "mapPoints": resolve_placeholders(data.get("mapPoints", []), schedule),
+        "giftCollector": gift_collector_info(data),
     }
 
 
@@ -55,11 +79,11 @@ def _age_ms(age_hours) -> int:
     return int(time.time() * 1000) - int(round(float(age_hours or 0) * 3600000))
 
 
-# Campi "di testo" di un regalo che il JSON può aggiornare (mai collected_amount).
+# Campi di un regalo che il JSON può aggiornare.
 GIFT_TEXT_FIELDS = {
     "name": ("name", str), "specialization": ("specialization", str), "roleTitle": ("role_title", str),
     "giftTitle": ("gift_title", str), "giftDescription": ("gift_description", str),
-    "targetAmount": ("target_amount", float), "iban": ("iban", str), "ibanHolder": ("iban_holder", str),
+    "iban": ("iban", str), "ibanHolder": ("iban_holder", str),
     "satispayUrl": ("satispay_url", str), "paypalMeUrl": ("paypal_me_url", str),
 }
 
@@ -69,18 +93,24 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
     - I regali del JSON che mancano nel database vengono inseriti (es. un nuovo neo-specialista
       aggiunto dopo il primo avvio).
     - Con update_texts=True (variabile GIFT_SYNC_UPDATE_TEXTS) anche i regali già presenti
-      vengono aggiornati nei testi, negli IBAN/link e nell'obiettivo; la quota raccolta
-      (collected_amount) non viene mai toccata.
-    Ritorna {"added": n, "updated": n}."""
+      vengono aggiornati nei testi e negli IBAN/link.
+    - I regali presenti nel database ma non più nel JSON vengono rimossi (es. il vecchio
+      "regalo comune", sostituito dal cassiere delle quote uniche).
+    Ritorna {"added": n, "updated": n, "removed": n}."""
     first_fill = db.scalar(select(GiftTarget).limit(1)) is None
-    added = updated = 0
+    added = updated = removed = 0
+    wanted = {t["id"] for t in data.get("giftTargets", [])}
+    for stale in db.scalars(select(GiftTarget)).all():
+        if stale.id not in wanted:
+            db.delete(stale)
+            removed += 1
     for i, t in enumerate(data.get("giftTargets", [])):
         existing = db.get(GiftTarget, t["id"])
         if existing is not None:
             if update_texts:
                 changed = False
                 for json_key, (attr, cast) in GIFT_TEXT_FIELDS.items():
-                    new_value = cast(t.get(json_key, "" if cast is str else 0))
+                    new_value = cast(t.get(json_key, ""))
                     if getattr(existing, attr) != new_value:
                         setattr(existing, attr, new_value)
                         changed = True
@@ -97,9 +127,6 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
                 role_title=t.get("roleTitle", ""),
                 gift_title=t.get("giftTitle", ""),
                 gift_description=t.get("giftDescription", ""),
-                target_amount=float(t.get("targetAmount", 0)),
-                # importi demo solo quando si popola da zero con i dati finti
-                collected_amount=float(t.get("collectedAmount", 0)) if (include_demo and first_fill) else 0.0,
                 iban=t.get("iban", ""),
                 iban_holder=t.get("ibanHolder", ""),
                 satispay_url=t.get("satispayUrl", ""),
@@ -108,17 +135,17 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
             )
         )
         added += 1
-    if (added and not first_fill) or updated:
+    if (added and not first_fill) or updated or removed:
         bump_version(db)  # i client in polling ricaricano lo snapshot e vedono le modifiche
-    if added or updated:
+    if added or updated or removed:
         db.commit()
-    return {"added": added, "updated": updated}
+    return {"added": added, "updated": updated, "removed": removed}
 
 
 def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts: bool = False) -> None:
     """Popola le tabelle vuote. I regali (configurazione) vengono sempre allineati al JSON
     (aggiunti se mancanti, anche su un database già avviato; testi aggiornati solo con
-    update_gift_texts); invitati, prenotazioni, auguri, foto, contributi e notifiche solo se
+    update_gift_texts); invitati, prenotazioni, auguri, foto, quote uniche e notifiche solo se
     include_demo e solo al primo avvio."""
     sync_gift_targets(db, data, include_demo, update_texts=update_gift_texts)
 
@@ -170,17 +197,30 @@ def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts
                     created_at=_age_ms(p.get("ageHours")),
                 )
             )
-        for c in data.get("giftContributions", []):
+        names = {t["id"]: t.get("name", "") for t in data.get("giftTargets", [])}
+        for c in data.get("giftPoolContributions", []):
+            allocations = [
+                GiftPoolAllocation(
+                    graduate_id=a["graduateId"],
+                    graduate_name=names.get(a["graduateId"], ""),
+                    amount=round(float(a.get("amount", 0)), 2),
+                )
+                for a in c.get("allocations", [])
+            ]
+            created = _age_ms(c.get("ageHours"))
+            received = c.get("status", "PENDING") == "RECEIVED"
             db.add(
-                GiftContribution(
+                GiftPoolContribution(
                     donor_name=c["donorName"],
-                    target_graduate_id=c["targetGraduateId"],
-                    target_graduate_name=c.get("targetGraduateName", ""),
-                    amount=float(c.get("amount", 0)),
+                    contact=c.get("contact", ""),
                     payment_method=c.get("paymentMethod", "IBAN"),
+                    split_mode=c.get("splitMode", "EQUAL"),
+                    total_amount=round(sum(a.amount for a in allocations), 2),
                     note=c.get("note", ""),
-                    is_anonymous=bool(c.get("isAnonymous", False)),
-                    contributed_at=_age_ms(c.get("ageHours")),
+                    status="RECEIVED" if received else "PENDING",
+                    created_at=created,
+                    received_at=created if received else None,
+                    allocations=allocations,
                 )
             )
         for n in data.get("notifications", []):

@@ -1,7 +1,7 @@
 """Report riassuntivo per gli organizzatori, pensato per essere spedito da n8n (es. mail mattutina).
 
 build_report raccoglie in un solo dizionario tutto ciò che serve per un aggiornamento:
-coperti confermati e menu speciali, posti navetta, quote regalo, novità delle ultime ore,
+coperti confermati e menu speciali, posti navetta, quote uniche per il cassiere, novità delle ultime ore,
 notifiche programmate. render_text / render_html lo trasformano nel corpo di una mail, così in
 n8n basta un nodo HTTP Request + un nodo Send Email (vedi n8n/ nel repo).
 """
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from .models import (
     BusBooking,
     EventNotification,
-    GiftContribution,
+    GiftPoolContribution,
     GiftTarget,
     Guest,
     PushSubscription,
@@ -24,6 +24,7 @@ from .models import (
     Wish,
     now_ms,
 )
+from .routers.gifts import pool_summary
 from .routers.guests import _NO_DIET, guests_summary
 from .schedule import get_schedule
 from .state import get_version
@@ -77,7 +78,7 @@ def build_report(
     guests = db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()
     bookings = db.scalars(select(BusBooking).order_by(BusBooking.booked_at.desc())).all()
     targets = db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc(), GiftTarget.id.asc())).all()
-    contributions = db.scalars(select(GiftContribution).order_by(GiftContribution.contributed_at.desc())).all()
+    pool = db.scalars(select(GiftPoolContribution).order_by(GiftPoolContribution.created_at.desc())).all()
     wishes = db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()
     photos = db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()
     scheduled = db.scalars(
@@ -100,7 +101,7 @@ def build_report(
     recent_bookings = [b for b in bookings if (b.booked_at or 0) >= since]
     recent_wishes = [w for w in wishes if (w.created_at or 0) >= since]
     recent_photos = [p for p in photos if (p.created_at or 0) >= since]
-    recent_contribs = [c for c in contributions if (c.contributed_at or 0) >= since]
+    recent_pool = [c for c in pool if (c.created_at or 0) >= since]
 
     return {
         "generatedAt": now,
@@ -125,22 +126,8 @@ def build_report(
             "returnTripSeats": sum(b.seats_count for b in bookings if b.return_trip_wanted),
             "byStop": _by_stop(bookings),
         },
-        "gifts": {
-            "totalCollected": round(sum(t.collected_amount for t in targets), 2),
-            "totalTarget": round(sum(t.target_amount for t in targets), 2),
-            "contributions": len(contributions),
-            "targets": [
-                {
-                    "id": t.id,
-                    "name": t.name,
-                    "giftTitle": t.gift_title,
-                    "targetAmount": t.target_amount,
-                    "collectedAmount": t.collected_amount,
-                    "progress": round(t.collected_amount / t.target_amount, 3) if t.target_amount else None,
-                }
-                for t in targets
-            ],
-        },
+        # quote uniche versate al cassiere (le donazioni dirette ai neo-specialisti non passano dal server)
+        "gifts": {**pool_summary(pool, targets), "graduates": len(targets)},
         "wishes": {"count": len(wishes), "hearts": sum(w.heart_count for w in wishes)},
         "photos": {"count": len(photos), "likes": sum(p.likes_count for p in photos)},
         "notifications": {
@@ -159,13 +146,13 @@ def build_report(
             "busBookings": [b.to_dict() for b in recent_bookings],
             "wishes": [w.to_dict() for w in recent_wishes],
             "photos": [p.to_dict(base_url) for p in recent_photos],
-            "giftContributions": [c.to_dict() for c in recent_contribs],
+            "giftPool": [c.to_dict() for c in recent_pool],
             "counts": {
                 "guests": len(recent_guests),
                 "busBookings": len(recent_bookings),
                 "wishes": len(recent_wishes),
                 "photos": len(recent_photos),
-                "giftContributions": len(recent_contribs),
+                "giftPool": len(recent_pool),
             },
         },
     }
@@ -221,11 +208,14 @@ def _lines(report: dict) -> list[tuple[str, list[str]]]:
         bus_lines.append("Per fermata: " + ", ".join(f"{s['stop']} {s['seats']}" for s in bus["byStop"]) + ".")
 
     gift_lines = [
-        f"Raccolti {_fmt_eur(gifts['totalCollected'])} su {_fmt_eur(gifts['totalTarget'])} con {gifts['contributions']} quote."
+        f"Quote uniche al cassiere: {gifts['contributions']} per {_fmt_eur(gifts['totalAmount'])} "
+        f"(ricevute {gifts['received']} per {_fmt_eur(gifts['receivedAmount'])}, "
+        f"in attesa {_fmt_eur(gifts['pendingAmount'])})."
     ]
-    for t in gifts["targets"]:
-        pct = f" ({round(t['progress'] * 100)}%)" if t["progress"] is not None else ""
-        gift_lines.append(f"{t['name']}: {_fmt_eur(t['collectedAmount'])} / {_fmt_eur(t['targetAmount'])}{pct}")
+    for t in gifts["byGraduate"]:
+        if t["contributions"]:
+            gift_lines.append(f"{t['graduateName']}: {_fmt_eur(t['amount'])} da {_plural(t['contributions'], 'quota', 'quote')}")
+    gift_lines.append("Le donazioni dirette ai neo-specialisti non passano dal server.")
 
     c = rec["counts"]
     recent_lines = []
@@ -241,8 +231,11 @@ def _lines(report: dict) -> list[tuple[str, list[str]]]:
         for b in rec["busBookings"]:
             seats = _plural(b["seatsCount"], "posto", "posti")
             recent_lines.append(f"Navetta: {b['passengerName']}, {seats}, {b['pickupStop'] or 'fermata da indicare'}")
-        for k in rec["giftContributions"]:
-            recent_lines.append(f"Regalo: {k['donorName']} -> {k['targetGraduateName']} {_fmt_eur(k['amount'])}")
+        for k in rec["giftPool"]:
+            recent_lines.append(
+                f"Quota unica: {k['donorName']} {_fmt_eur(k['totalAmount'])} ({k['paymentMethod']}) "
+                f"per {_plural(len(k['allocations']), 'neo-specialista', 'neo-specialisti')}"
+            )
         for w in rec["wishes"]:
             recent_lines.append(f"Augurio di {w['authorName']} per {w['targetGraduate']}: \"{w['message'][:120]}\"")
         for p in rec["photos"]:

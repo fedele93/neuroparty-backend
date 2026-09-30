@@ -7,7 +7,6 @@ from ..deps import base_url_for, get_db
 from ..models import (
     BusBooking,
     EventNotification,
-    GiftContribution,
     GiftTarget,
     Guest,
     SharedPhoto,
@@ -52,13 +51,14 @@ def state(request: Request, db: Session = Depends(get_db)):
         "version": get_version(db),
         "serverTime": now_ms(),
         "adminEnabled": bool(request.app.state.settings.admin_token),
+        "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.admin_token),
         "pushSubscriptions": subscription_count(db),
     }
 
 
 @router.get("/snapshot")
 def snapshot(request: Request, db: Session = Depends(get_db)):
-    """Tutte le collezioni in una sola risposta: usato dall'app Android per sincronizzare Room."""
+    """Tutte le collezioni pubbliche in una sola risposta: usato dall'app Android per sincronizzare Room."""
     base = base_url_for(request)
     return {
         "version": get_version(db),
@@ -68,10 +68,8 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
         "busBookings": [b.to_dict() for b in db.scalars(select(BusBooking).order_by(BusBooking.booked_at.desc())).all()],
         "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()],
         "photos": [p.to_dict(base) for p in db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()],
+        # niente importi né elenco delle quote: le quote uniche le vede solo il cassiere (GET /api/gifts/pool)
         "giftTargets": [t.to_dict() for t in db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all()],
-        "giftContributions": [
-            c.to_dict() for c in db.scalars(select(GiftContribution).order_by(GiftContribution.contributed_at.desc())).all()
-        ],
         "notifications": [
             n.to_dict()
             for n in db.scalars(

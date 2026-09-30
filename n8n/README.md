@@ -16,7 +16,7 @@ backend  --POST evento JSON (X-Automation-Secret)-->  n8n nodo Webhook      (il 
 `Schedule Trigger → Impostazioni → HTTP Request → Send Email`
 
 Ogni giorno alle 8:00 (ora italiana) scarica `GET /api/automation/report.html` e lo spedisce
-via mail: coperti confermati e menu speciali, posti navetta per fermata, quote regalo,
+via mail: coperti confermati e menu speciali, posti navetta per fermata, quote uniche al cassiere,
 novità delle ultime 24 ore, notifiche programmate.
 
 Da compilare nel nodo **Impostazioni**:
@@ -44,7 +44,7 @@ Varianti veloci:
 
 Il backend chiama il nodo **Webhook** ogni volta che succede qualcosa; il nodo **Code**
 trasforma l'evento in oggetto + testo e lascia passare solo quelli interessanti (nuovo RSVP,
-cambio di stato RSVP, prenotazione navetta, quota regalo, evento di test). Auguri, foto e
+cambio di stato RSVP, prenotazione navetta, quota unica al cassiere, evento di test). Auguri, foto e
 notifiche vengono ignorati: basta aggiungere un `case` nello switch per riceverli.
 
 Collegamento:
@@ -85,7 +85,8 @@ corpo, se vuoi verificare la firma in un nodo Code.
 | `bus.booked` / `bus.cancelled` | `booking`, `bus` (posti totali/prenotati/liberi) |
 | `wish.created` | `wish` |
 | `photo.uploaded` | `photo` (con `imageUri` assoluto) |
-| `gift.contributed` | `contribution`, `target` (con l'importo raccolto aggiornato) |
+| `gift.pooled` | `contribution` (quota unica al cassiere, con `allocations` per neo-specialista), `summary` (totali aggiornati) |
+| `gift.pool_deleted` | `contributionId` |
 | `notification.scheduled` | `notification` (programmata dagli organizzatori) |
 | `notification.published` | `notification`, `scheduled` (true se pubblicata dallo scheduler) |
 | `test` | `message`, `app` |
