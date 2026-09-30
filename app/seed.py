@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .schedule import get_schedule, resolve_placeholders
 from .state import bump_version
 from .models import (
+    AssistantAvatar,
     BusBooking,
     EventNotification,
     GiftPoolAllocation,
@@ -142,12 +143,39 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
     return {"added": added, "updated": updated, "removed": removed}
 
 
+def sync_assistant_avatars(db: Session, data: dict) -> int:
+    """Un avatar per ogni neo-specialista (stessi id dei regali). I valori iniziali (persona,
+    abilitato) vengono dal blocco "assistant.avatars" del JSON e valgono solo al primo inserimento:
+    poi comandano le modifiche fatte dagli organizzatori dal pannello. Ritorna gli avatar aggiunti."""
+    initial = {a["id"]: a for a in (data.get("assistant") or {}).get("avatars", []) if a.get("id")}
+    added = 0
+    for i, t in enumerate(data.get("giftTargets", [])):
+        if db.get(AssistantAvatar, t["id"]) is not None:
+            continue
+        init = initial.get(t["id"], {})
+        db.add(
+            AssistantAvatar(
+                id=t["id"],
+                name=t.get("name", t["id"]),
+                persona=init.get("persona", ""),
+                enabled=bool(init.get("enabled", False)),
+                preset_voice_id=init.get("presetVoiceId") or None,
+                sort_order=i,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    return added
+
+
 def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts: bool = False) -> None:
     """Popola le tabelle vuote. I regali (configurazione) vengono sempre allineati al JSON
     (aggiunti se mancanti, anche su un database già avviato; testi aggiornati solo con
     update_gift_texts); invitati, prenotazioni, auguri, foto, quote uniche e notifiche solo se
     include_demo e solo al primo avvio."""
     sync_gift_targets(db, data, include_demo, update_texts=update_gift_texts)
+    sync_assistant_avatars(db, data)
 
     if db.get(Meta, "seeded"):
         return
