@@ -19,10 +19,12 @@ arrivano davvero a tutti.
 | Navetta (con controllo dei 54 posti) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}` |
 | Bacheca auguri | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart` |
 | Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like` |
-| Regali e quote | `GET /api/gifts/targets`, `GET/POST /api/gifts/contributions` |
+| Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |
+| Quota unica al cassiere (ripartita fra i neo-specialisti) | `POST /api/gifts/pool`, `GET /api/gifts/pool/mine`, `DELETE /api/gifts/pool/{id}` |
+| Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status` (token cassiere o organizzatori) |
 | Notifiche (cronologia + **Web Push** a tutti i dispositivi) | `GET /api/notifications`, `POST /api/notifications` (solo organizzatori) |
 | Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
-| Export CSV per ristorante e autista | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori) |
+| Export CSV per ristorante, autista e cassiere | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori), `GET /api/export/gift-pool.csv` (cassiere o organizzatori) |
 | Sottoscrizione push del browser | `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` |
 | Automazioni con **n8n**: report pronto per mail (JSON/testo/HTML), stato dei webhook, test | `GET /api/automation/report[.txt|.html]`, `GET /api/automation/status`, `POST /api/automation/webhook-test` (token automazioni o organizzatori) |
 | Sincronizzazione app Android in una chiamata | `GET /api/snapshot`, `GET /api/state` |
@@ -36,6 +38,8 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
   notifiche push e cancellare qualsiasi record;
 - le automazioni (n8n) usano `X-Automation-Token` (`AUTOMATION_TOKEN`): sola lettura su report,
   riepiloghi ed export CSV;
+- il cassiere delle quote uniche usa `X-Treasurer-Token` (`TREASURER_TOKEN`): vede e gestisce
+  solo le quote uniche (elenco, stato "ricevuta", CSV), senza i poteri dell'organizzatore;
 - cambiare lo stato RSVP di un invitato è permesso a tutti.
 
 ## Stack
@@ -93,7 +97,8 @@ nano .env
 | `ADMIN_TOKEN` | stringa segreta lunga (`openssl rand -hex 24`) |
 | `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
-| `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/obiettivo dei regali già in database dal JSON al riavvio (quote raccolte intatte); di default `false` |
+| `TREASURER_TOKEN` | token per il cassiere delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni |
+| `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
 | `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `N8N_WEBHOOK_EVENTS`, `AUTOMATION_TOKEN` | opzionali, per collegare n8n (vedi *Automazioni con n8n*) |
 
@@ -184,11 +189,13 @@ già inoltrato al container `api`):
 1. **n8n legge dal backend** (per report periodici): con il token di sola lettura
    `AUTOMATION_TOKEN` (header `X-Automation-Token`) n8n può chiamare
    - `GET /api/automation/report` — JSON completo: coperti confermati e menu speciali, posti
-     navetta per fermata, quote regalo per neo-specialista, novità nelle ultime `sinceHours` ore
-     (default 24: nuovi RSVP, prenotazioni, quote, auguri, foto), notifiche programmate;
+     navetta per fermata, quote uniche al cassiere (totali e per neo-specialista), novità nelle
+     ultime `sinceHours` ore (default 24: nuovi RSVP, prenotazioni, quote, auguri, foto),
+     notifiche programmate;
    - `GET /api/automation/report.txt` e `.html` — lo stesso report già impaginato, da incollare
      nel corpo di una mail (o di un messaggio Telegram);
-   - `GET /api/export/guests.csv`, `GET /api/export/bus.csv` — i CSV, per allegarli.
+   - `GET /api/export/guests.csv`, `GET /api/export/bus.csv`, `GET /api/export/gift-pool.csv` — i
+     CSV, per allegarli.
 
    Per **inviare notifiche push** da n8n (es. promemoria automatico la sera prima) si usa il
    normale `POST /api/notifications` con `X-Admin-Token`.
@@ -197,7 +204,7 @@ già inoltrato al container `api`):
    *Webhook* di n8n, ogni evento rilevante viene inviato come POST JSON
    `{"event": "bus.booked", "timestamp": ..., "data": {...}}`. Eventi: `guest.created`,
    `guest.updated`, `guest.deleted`, `bus.booked`, `bus.cancelled`, `wish.created`,
-   `photo.uploaded`, `gift.contributed`, `notification.scheduled`, `notification.published`,
+   `photo.uploaded`, `gift.pooled`, `gift.pool_deleted`, `notification.scheduled`, `notification.published`,
    `test`. L'invio avviene in un thread separato con tentativi ripetuti: se n8n è spento
    l'app continua a funzionare e nel log compare un avviso. `N8N_WEBHOOK_EVENTS` filtra gli
    eventi (`guest.*,bus.booked`); `N8N_WEBHOOK_SECRET` viene inviato nell'header
@@ -229,8 +236,9 @@ giornaliero via mail** (Schedule → HTTP Request → Send Email) e **avvisi in 
 
 ## Dati dell'evento
 
-`seed/event-data.json` contiene programma, mappa, orari navetta, laureandi e la lista dei
-regali (con IBAN, link Satispay/PayPal). Modificalo e riavvia (`docker compose restart api`):
+`seed/event-data.json` contiene programma, mappa, orari navetta, laureandi, la lista dei
+regali (con IBAN, link Satispay/PayPal) e il cassiere delle quote uniche (`giftCollector`).
+Modificalo e riavvia (`docker compose restart api`):
 la PWA legge questi dati dal server, quindi date e luoghi si aggiornano senza ricompilare
 nulla. Tieni allineata la copia in `spec2026app/pwa/shared/event-data.json`, usata come
 fallback offline e per generare i dati dell'app Android.
@@ -252,17 +260,30 @@ timeline, mappa, navetta e il file calendario si aggiornano da soli.
 
 ### Regali
 
-I regali (`giftTargets`) vivono invece nel database: al riavvio il server aggiunge quelli
-presenti nel JSON ma non ancora nel database (per esempio un neo-specialista aggiunto dopo il
-primo avvio) senza toccare le quote già raccolte. Per cambiare titolo, descrizione, IBAN, link
-o obiettivo di un regalo già esistente modifica il JSON e riavvia con
-`GIFT_SYNC_UPDATE_TEXTS=true` nel `.env` (le quote raccolte non vengono mai modificate); i
-client ricaricano i dati da soli perché la versione viene incrementata.
+La sezione Regali non mostra mai cifre raccolte o obiettivi: chi vuole donare a un singolo
+neo-specialista trova nella sua card l'IBAN da copiare e i link PayPal e Satispay, senza
+registrare nulla. Chi preferisce fare **un solo versamento** lo fa al **cassiere**
+(`giftCollector` nel JSON: nome, IBAN, PayPal, causale suggerita; metodi ammessi IBAN, PayPal
+e contanti), scegliendo se dividere la quota in parti uguali fra i neo-specialisti o
+personalizzarla. Queste quote vengono registrate sul server con la ripartizione e sono
+visibili solo al cassiere e agli organizzatori: nella PWA, inserendo `TREASURER_TOKEN` in
+⚙️ Impostazioni, la tab Regali mostra il cruscotto (quanto spetta a ciascuno, elenco delle
+quote, stato "ricevuta") e il pulsante per scaricare `quote-uniche.csv`, con una colonna per
+neo-specialista e le righe dei totali, pronto per Excel. Ogni dispositivo può cancellare la
+propria quota finché il cassiere non l'ha segnata come ricevuta.
 
-> Attenzione: gli IBAN e i link di pagamento nel file di esempio sono segnaposto. All'avvio in
-> produzione (`SEED_DEMO_DATA=false`) il server scrive un avviso nel log per ogni IBAN che non
-> supera il controllo di validità; nel repo dell'app `python3 tools/check-event-data.py --strict`
-> fa lo stesso controllo e blocca la release finché restano IBAN finti.
+I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti
+nel JSON ma non ancora nel database (per esempio un neo-specialista aggiunto dopo il primo
+avvio) e rimuove quelli tolti dal JSON. Per cambiare titolo, descrizione, IBAN o link di un
+regalo già esistente modifica il JSON e riavvia con `GIFT_SYNC_UPDATE_TEXTS=true` nel `.env`;
+i client ricaricano i dati da soli perché la versione viene incrementata. Il cassiere invece
+è letto dal JSON a ogni avvio, senza flag.
+
+> Attenzione: gli IBAN e i link di pagamento nel file di esempio sono segnaposto (anche quelli
+> del cassiere). All'avvio in produzione (`SEED_DEMO_DATA=false`) il server scrive un avviso nel
+> log per ogni IBAN che non supera il controllo di validità; nel repo dell'app
+> `python3 tools/check-event-data.py --strict` fa lo stesso controllo e blocca la release finché
+> restano IBAN finti.
 
 ## Sviluppo locale
 

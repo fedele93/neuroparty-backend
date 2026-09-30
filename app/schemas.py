@@ -73,13 +73,40 @@ class WishIn(BaseModel):
         return v
 
 
-class ContributionIn(BaseModel):
-    donorName: str = Field(default="Invitato", max_length=200)
-    targetGraduateId: str = Field(min_length=1, max_length=64)
+PoolPaymentMethod = Literal["IBAN", "PayPal", "Contanti"]
+PoolSplitMode = Literal["EQUAL", "CUSTOM"]
+PoolStatus = Literal["PENDING", "RECEIVED"]
+
+
+class PoolAllocationIn(BaseModel):
+    graduateId: str = Field(min_length=1, max_length=64)
     amount: float = Field(gt=0, le=100000)
-    paymentMethod: str = Field(default="IBAN", max_length=50)
+
+
+class PoolContributionIn(BaseModel):
+    """Quota unica versata al cassiere e ripartita fra i neo-specialisti.
+    - splitMode EQUAL: totalAmount diviso in parti uguali fra graduateIds (vuoto = tutti);
+    - splitMode CUSTOM: allocations con un importo per neo-specialista (il totale è la somma)."""
+    donorName: str = Field(min_length=1, max_length=200)
+    contact: str = Field(default="", max_length=200)
+    paymentMethod: PoolPaymentMethod = "IBAN"
+    splitMode: PoolSplitMode = "EQUAL"
+    totalAmount: float | None = Field(default=None, gt=0, le=100000)
+    graduateIds: list[str] = Field(default_factory=list, max_length=100)
+    allocations: list[PoolAllocationIn] = Field(default_factory=list, max_length=100)
     note: str = Field(default="", max_length=1000)
-    isAnonymous: bool = False
+
+    @field_validator("donorName", "contact", "note")
+    @classmethod
+    def strip(cls, v: str, info) -> str:
+        v = _clean(v)
+        if info.field_name == "donorName" and not v:
+            raise ValueError("Il nome è obbligatorio: serve al cassiere per riconoscere il versamento")
+        return v
+
+
+class PoolStatusIn(BaseModel):
+    status: PoolStatus
 
 
 class NotificationIn(BaseModel):

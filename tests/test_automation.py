@@ -54,13 +54,12 @@ def test_webhook_events_and_signature(tmp_path):
         b = c.post("/api/bus/bookings", json={"passengerName": "Anna", "seatsCount": 3}, headers={"X-Client-Id": "a"}).json()
         c.delete(f"/api/bus/bookings/{b['id']}", headers={"X-Client-Id": "a"})
         c.post("/api/wishes", json={"authorName": "Zia", "message": "Bravi!"})
-        target = c.get("/api/gifts/targets").json()[0]["id"]
-        c.post("/api/gifts/contributions", json={"donorName": "Nonna", "targetGraduateId": target, "amount": 50})
+        c.post("/api/gifts/pool", json={"donorName": "Nonna", "totalAmount": 90, "paymentMethod": "IBAN"})
         c.post("/api/notifications", json={"title": "Ciao", "message": "a tutti"}, headers=ADMIN)
 
         assert n8n.events == [
             "guest.created", "guest.updated", "guest.deleted",
-            "bus.booked", "bus.cancelled", "wish.created", "gift.contributed", "notification.published",
+            "bus.booked", "bus.cancelled", "wish.created", "gift.pooled", "notification.published",
         ]
         created = n8n.payload(0)
         assert created["source"] == "neuroparty" and created["data"]["guest"]["fullName"] == "Mario Rossi"
@@ -68,7 +67,9 @@ def test_webhook_events_and_signature(tmp_path):
         assert n8n.payload(1)["data"]["changes"] == {"rsvpStatus": "DECLINED"}
         assert n8n.payload(3)["data"]["bus"]["bookedSeats"] == 13  # 10 demo + 3
         assert n8n.payload(4)["data"]["bus"]["bookedSeats"] == 10
-        assert n8n.payload(6)["data"]["target"]["collectedAmount"] > 0
+        pooled = n8n.payload(6)["data"]
+        assert pooled["contribution"]["donorName"] == "Nonna" and len(pooled["contribution"]["allocations"]) == 9
+        assert pooled["summary"]["totalAmount"] == 180 + 150 + 90 + 90  # demo + Nonna
         assert n8n.payload(7)["data"]["scheduled"] is False
 
         # header: evento, segreto condiviso e firma HMAC del corpo
@@ -155,8 +156,9 @@ def test_report_json_text_html(client):
     assert rep["guests"]["totalGuests"] == 8 and rep["guests"]["covers"] == client.get("/api/guests/summary").json()["covers"]
     assert rep["bus"] == {**rep["bus"], "maxSeats": 54, "bookedSeats": 10, "availableSeats": 44, "bookings": 3}
     assert sum(s["seats"] for s in rep["bus"]["byStop"]) == 10
-    assert len(rep["gifts"]["targets"]) == 10 and rep["gifts"]["contributions"] == 4
-    assert rep["gifts"]["totalCollected"] == round(sum(t["collectedAmount"] for t in rep["gifts"]["targets"]), 2)
+    assert rep["gifts"]["graduates"] == 9 and rep["gifts"]["contributions"] == 3
+    assert rep["gifts"]["totalAmount"] == 420 and rep["gifts"]["receivedAmount"] == 180
+    assert sum(g["amount"] for g in rep["gifts"]["byGraduate"]) == 420
     assert rep["wishes"]["count"] == 10 and rep["photos"]["count"] == 3
     assert [n["title"] for n in rep["notifications"]["scheduled"]] == ["Promemoria"]
     # i dati demo vengono creati "adesso", quindi contano anch'essi come novità delle ultime 24 ore

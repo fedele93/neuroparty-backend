@@ -40,7 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="NeuroParty API",
-        version="1.2.0",
+        version="1.3.0",
         description="Backend condiviso per l'app Android e la PWA della festa di specializzazione in Neurologia.",
         lifespan=lifespan,
     )

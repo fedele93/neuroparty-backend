@@ -20,6 +20,7 @@ def make_client(
     seed_file=SEED,
     update_gift_texts=False,
     automation_token="",
+    treasurer_token="",
     webhook_url="",
     webhook_secret="",
     webhook_events="*",
@@ -33,6 +34,7 @@ def make_client(
         admin_token=admin_token,
         public_url="https://festa.example.org",
         automation_token=automation_token,
+        treasurer_token=treasurer_token,
         n8n_webhook_url=webhook_url,
         n8n_webhook_secret=webhook_secret,
         n8n_webhook_events=webhook_events,
@@ -60,3 +62,4 @@ def empty_client(tmp_path):
 
 
 ADMIN = {"X-Admin-Token": "segreto-test"}
+TREASURER = {"X-Treasurer-Token": "cassa-test"}

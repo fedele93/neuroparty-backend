@@ -34,11 +34,19 @@ ADDED_COLUMNS = {
     "event_notifications": {"scheduled_at": "INTEGER"},
 }
 
+# Residui della prima versione dei regali (importi raccolti e quote per singolo destinatario),
+# eliminati con il passaggio alla quota unica: gli utenti non devono vedere le cifre.
+DROPPED_TABLES = ("gift_contributions",)
+DROPPED_COLUMNS = {
+    "gift_targets": ("target_amount", "collected_amount"),
+}
+
 
 def ensure_schema(engine) -> list[str]:
-    """Crea le tabelle mancanti e aggiunge le colonne nuove. Ritorna le colonne aggiunte."""
+    """Crea le tabelle mancanti, aggiunge le colonne nuove e rimuove quelle dismesse.
+    Ritorna l'elenco delle modifiche applicate."""
     Base.metadata.create_all(engine)
-    added = []
+    changes = []
     insp = inspect(engine)
     with engine.begin() as conn:
         for table, cols in ADDED_COLUMNS.items():
@@ -46,5 +54,15 @@ def ensure_schema(engine) -> list[str]:
             for name, ddl in cols.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
-                    added.append(f"{table}.{name}")
-    return added
+                    changes.append(f"+{table}.{name}")
+        for table in DROPPED_TABLES:
+            if insp.has_table(table):
+                conn.execute(text(f"DROP TABLE {table}"))
+                changes.append(f"-{table}")
+        for table, cols in DROPPED_COLUMNS.items():
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for name in cols:
+                if name in existing:
+                    conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {name}"))  # SQLite >= 3.35
+                    changes.append(f"-{table}.{name}")
+    return changes

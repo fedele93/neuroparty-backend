@@ -4,7 +4,7 @@ import re
 
 from PIL import Image
 
-from conftest import ADMIN, SEED, make_client
+from conftest import ADMIN, SEED, TREASURER, make_client
 
 
 def test_health_and_event(client):
@@ -13,6 +13,8 @@ def test_health_and_event(client):
     assert len(ev["graduates"]) == 9
     assert ev["meta"]["maxBusSeats"] == 54
     assert len(ev["program"]["timeline"]) == 5
+    assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"
+    assert ev["giftCollector"]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
 
 
 def test_demo_seed_matches_json(client):
@@ -21,17 +23,22 @@ def test_demo_seed_matches_json(client):
     assert len(snap["busBookings"]) == 3
     assert len(snap["wishes"]) == 10
     assert len(snap["photos"]) == 3
-    assert len(snap["giftTargets"]) == 10
-    assert len(snap["giftContributions"]) == 4
+    assert len(snap["giftTargets"]) == 9
+    assert "giftContributions" not in snap  # le quote uniche non sono pubbliche
+    assert snap["event"]["giftCollector"]["ibanHolder"] == "Paolo Roberto"
     assert len(snap["notifications"]) == 4
     assert snap["version"] >= 1
+    # le quote demo esistono ma le vede solo il cassiere
+    pool = client.get("/api/gifts/pool", headers=ADMIN).json()
+    assert pool["summary"]["contributions"] == 3 and pool["summary"]["received"] == 1
+    assert pool["summary"]["totalAmount"] == 180 + 150 + 90
 
 
 def test_empty_seed_keeps_only_gift_targets(empty_client):
     snap = empty_client.get("/api/snapshot").json()
     assert snap["guests"] == [] and snap["wishes"] == [] and snap["notifications"] == []
-    assert len(snap["giftTargets"]) == 10
-    assert all(t["collectedAmount"] == 0 for t in snap["giftTargets"])
+    assert len(snap["giftTargets"]) == 9
+    assert empty_client.get("/api/gifts/pool", headers=ADMIN).json()["contributions"] == []
 
 
 def test_guest_crud_and_ownership(client):
@@ -98,18 +105,137 @@ def test_wishes(client):
     assert client.delete(f"/api/wishes/{w['id']}", headers=ADMIN).status_code == 204
 
 
-def test_gift_contribution_updates_target(client):
-    before = {t["id"]: t["collectedAmount"] for t in client.get("/api/gifts/targets").json()}
+def test_gift_targets_hide_amounts_and_pool_is_private(client):
+    targets = client.get("/api/gifts/targets").json()
+    assert [t["id"] for t in targets][:2] == ["luisi", "carlone"] and "gruppo" not in [t["id"] for t in targets]
+    for t in targets:
+        assert "collectedAmount" not in t and "targetAmount" not in t
+        assert t["iban"] and t["paypalMeUrl"] and t["satispayUrl"]
+    collector = client.get("/api/gifts/collector").json()
+    assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
+    assert "Satispay" not in collector["paymentMethods"]
+    # elenco e stato riservati al cassiere/organizzatori
+    assert client.get("/api/gifts/pool").status_code == 403
+    assert client.get("/api/gifts/pool", headers={"X-Treasurer-Token": "sbagliato"}).status_code == 403
+    assert client.patch("/api/gifts/pool/1/status", json={"status": "RECEIVED"}).status_code == 403
+    assert client.get("/api/export/gift-pool.csv").status_code == 403
+
+
+def test_pool_equal_split(client):
+    v0 = client.get("/api/state").json()["version"]
     r = client.post(
-        "/api/gifts/contributions",
-        json={"donorName": "Zio", "targetGraduateId": "luisi", "amount": 50, "paymentMethod": "Satispay", "isAnonymous": True},
+        "/api/gifts/pool",
+        json={"donorName": "  Zio Peppe ", "totalAmount": 100, "paymentMethod": "PayPal", "note": "Auguri!"},
+        headers={"X-Client-Id": "dev-a"},
     )
     assert r.status_code == 201
-    body = r.json()
-    assert body["contribution"]["donorName"] == "Un invitato generoso"
-    assert body["target"]["collectedAmount"] == before["luisi"] + 50
-    assert client.post("/api/gifts/contributions", json={"targetGraduateId": "nessuno", "amount": 10}).status_code == 404
-    assert client.post("/api/gifts/contributions", json={"targetGraduateId": "luisi", "amount": 0}).status_code == 422
+    c = r.json()
+    assert c["donorName"] == "Zio Peppe" and c["status"] == "PENDING" and c["splitMode"] == "EQUAL"
+    assert c["totalAmount"] == 100 and len(c["allocations"]) == 9
+    # 100 € / 9 = 11,11 con 1 centesimo di resto sul primo; la somma torna esatta
+    assert c["allocations"][0]["amount"] == 11.12 and c["allocations"][1]["amount"] == 11.11
+    assert round(sum(a["amount"] for a in c["allocations"]), 2) == 100
+    assert c["allocations"][0] == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 11.12}
+    assert client.get("/api/state").json()["version"] == v0 + 1
+
+    # solo alcuni neo-specialisti (es. escludo me stesso)
+    r = client.post("/api/gifts/pool", json={"donorName": "Fedele", "totalAmount": 80, "graduateIds": ["carlone", "totaro"]})
+    assert r.status_code == 201
+    assert [(a["graduateId"], a["amount"]) for a in r.json()["allocations"]] == [("carlone", 40), ("totaro", 40)]
+
+
+def test_pool_custom_split(client):
+    r = client.post(
+        "/api/gifts/pool",
+        json={
+            "donorName": "Colleghi", "splitMode": "CUSTOM", "paymentMethod": "Contanti",
+            "allocations": [{"graduateId": "prezioso", "amount": 30.5}, {"graduateId": "ruta", "amount": 19.5}],
+        },
+    )
+    assert r.status_code == 201
+    c = r.json()
+    assert c["totalAmount"] == 50 and c["paymentMethod"] == "Contanti" and c["splitMode"] == "CUSTOM"
+    assert [a["graduateName"] for a in c["allocations"]] == ["Dott. Roberto Spiridione Prezioso", "Dott.ssa Giorgia Ruta"]
+
+
+def test_pool_validation(client):
+    post = lambda body: client.post("/api/gifts/pool", json=body).status_code  # noqa: E731
+    assert post({"donorName": "", "totalAmount": 10}) == 422  # nome obbligatorio
+    assert post({"donorName": "A", "totalAmount": 10, "paymentMethod": "Satispay"}) == 422  # non ammesso per la cassa
+    assert post({"donorName": "A"}) == 422  # manca l'importo
+    assert post({"donorName": "A", "totalAmount": 0}) == 422
+    assert post({"donorName": "A", "totalAmount": 0.05}) == 422  # non divisibile fra 9
+    assert post({"donorName": "A", "totalAmount": 10, "graduateIds": ["nessuno"]}) == 404
+    assert post({"donorName": "A", "totalAmount": 10, "graduateIds": ["luisi", "luisi"]}) == 422
+    assert post({"donorName": "A", "splitMode": "CUSTOM"}) == 422
+    assert post({"donorName": "A", "splitMode": "CUSTOM", "allocations": [{"graduateId": "luisi", "amount": 5}], "totalAmount": 6}) == 422
+    assert post({"donorName": "A", "splitMode": "CUSTOM", "allocations": [{"graduateId": "x", "amount": 5}]}) == 404
+
+
+def test_pool_mine_and_delete_ownership(client):
+    a, b = {"X-Client-Id": "dev-a"}, {"X-Client-Id": "dev-b"}
+    mine = client.post("/api/gifts/pool", json={"donorName": "Anna", "totalAmount": 90}, headers=a).json()
+    assert [c["id"] for c in client.get("/api/gifts/pool/mine", headers=a).json()] == [mine["id"]]
+    assert client.get("/api/gifts/pool/mine", headers=b).json() == []
+    assert client.get("/api/gifts/pool/mine").json() == []
+    # un altro dispositivo non può cancellarla; il proprietario sì finché è in attesa
+    assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=b).status_code == 403
+    assert client.delete(f"/api/gifts/pool/{mine['id']}").status_code == 403
+    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "RECEIVED"}, headers=ADMIN)
+    assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 409  # già ricevuta
+    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "PENDING"}, headers=ADMIN)
+    assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 204
+    assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 404
+    # il cassiere/organizzatore cancella sempre
+    other = client.post("/api/gifts/pool", json={"donorName": "Bruno", "totalAmount": 9}, headers=b).json()
+    assert client.delete(f"/api/gifts/pool/{other['id']}", headers=ADMIN).status_code == 204
+
+
+def test_pool_treasurer_dashboard_and_csv(tmp_path):
+    with make_client(tmp_path, treasurer_token="cassa-test", automation_token="n8n-test") as c:
+        assert c.get("/api/state").json()["treasurerEnabled"] is True
+        board = c.get("/api/gifts/pool", headers=TREASURER).json()
+        s = board["summary"]
+        assert s["contributions"] == 3 and s["pending"] == 2 and s["receivedAmount"] == 180
+        luisi = next(g for g in s["byGraduate"] if g["graduateId"] == "luisi")
+        assert luisi == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 80, "receivedAmount": 20, "contributions": 3}
+        assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 150, "Contanti": 90}
+        assert board["contributions"][0]["donorName"] == "Amici del corso"  # la più recente per prima
+
+        # il cassiere segna come ricevuta la quota PayPal
+        paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal")
+        v0 = c.get("/api/state").json()["version"]
+        r = c.patch(f"/api/gifts/pool/{paypal['id']}/status", json={"status": "RECEIVED"}, headers=TREASURER)
+        assert r.status_code == 200 and r.json()["status"] == "RECEIVED" and r.json()["receivedAt"]
+        assert c.get("/api/state").json()["version"] == v0 + 1
+        assert c.patch(f"/api/gifts/pool/{paypal['id']}/status", json={"status": "RECEIVED"}, headers=TREASURER).status_code == 200
+        assert c.get("/api/state").json()["version"] == v0 + 1  # nessun cambiamento: versione ferma
+        assert c.patch("/api/gifts/pool/9999/status", json={"status": "RECEIVED"}, headers=TREASURER).status_code == 404
+        assert c.get("/api/gifts/pool", headers=TREASURER).json()["summary"]["receivedAmount"] == 330
+        # il token cassiere non dà i poteri dell'organizzatore
+        assert c.post("/api/notifications", json={"title": "a", "message": "b"}, headers=TREASURER).status_code == 403
+        assert c.get("/api/export/guests.csv", headers=TREASURER).status_code == 403
+
+        # CSV: una colonna per neo-specialista e righe dei totali; importi con la virgola
+        for headers in (TREASURER, ADMIN, {"X-Automation-Token": "n8n-test"}):
+            r = c.get("/api/export/gift-pool.csv", headers=headers)
+            assert r.status_code == 200
+        assert 'filename="quote-uniche.csv"' in r.headers["content-disposition"]
+        lines = r.text.lstrip("\ufeff").splitlines()
+        head = lines[0].split(";")
+        assert head[:9] == ["Data", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
+        assert head[9:] == [t["name"] for t in c.get("/api/gifts/targets").json()]
+        assert len(lines) == 1 + 3 + 2
+        rows = {ln.split(";")[1]: ln.split(";") for ln in lines[1:4]}
+        assert rows["Colleghi Reparto Stroke"][3:7] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
+        assert rows["Colleghi Reparto Stroke"][9] == "50,00" and rows["Colleghi Reparto Stroke"][10] == ""  # luisi, carlone
+        assert rows["Amici del corso"][5:7] == ["90,00", "In attesa"] and rows["Amici del corso"][9] == "10,00"
+        assert lines[4].split(";")[:6] == ["TOTALE", "", "", "", "", "420,00"] and lines[4].split(";")[9] == "80,00"
+        assert lines[5].split(";")[:6] == ["DI CUI RICEVUTO", "", "", "", "", "330,00"] and lines[5].split(";")[9] == "70,00"
+
+    with make_client(tmp_path / "b", admin_token="", treasurer_token="") as c:
+        assert c.get("/api/gifts/pool", headers=TREASURER).status_code == 503
+        assert c.get("/api/state").json()["treasurerEnabled"] is False
 
 
 def test_photo_upload_resizes_and_serves(client):
@@ -187,36 +313,55 @@ def test_new_gift_target_added_to_existing_database(tmp_path):
 
     with make_client(tmp_path, seed_file=str(old_seed)) as c1:
         assert [t["id"] for t in c1.get("/api/gifts/targets").json()].count("regina") == 0
-        c1.post("/api/gifts/contributions", json={"targetGraduateId": "luisi", "amount": 30, "donorName": "Zia"})
-        luisi_before = next(t for t in c1.get("/api/gifts/targets").json() if t["id"] == "luisi")["collectedAmount"]
+        c1.post("/api/gifts/pool", json={"donorName": "Zia", "totalAmount": 80})  # divisa fra gli 8 presenti
         v1 = c1.get("/api/state").json()["version"]
 
-    with make_client(tmp_path) as c2:  # riavvio con il JSON completo (10 regali)
+    with make_client(tmp_path) as c2:  # riavvio con il JSON completo (9 regali)
         targets = c2.get("/api/gifts/targets").json()
-        regina = next(t for t in targets if t["id"] == "regina")
-        assert regina["collectedAmount"] == 0 and regina["name"] == "Dott. Donato Regina"
+        assert next(t for t in targets if t["id"] == "regina")["name"] == "Dott. Donato Regina"
         assert targets[-1]["id"] == "regina"  # rispetta l'ordine del JSON
-        assert next(t for t in targets if t["id"] == "luisi")["collectedAmount"] == luisi_before
         assert c2.get("/api/state").json()["version"] == v1 + 1  # i client ricaricano
         assert len(c2.get("/api/guests").json()) == 7  # nessun doppio seed demo
+        # le quote registrate prima restano (con la ripartizione di allora)
+        board = c2.get("/api/gifts/pool", headers=ADMIN).json()
+        zia = next(k for k in board["contributions"] if k["donorName"] == "Zia")
+        assert len(zia["allocations"]) == 8 and all(a["amount"] == 10 for a in zia["allocations"])
+
+
+def test_gift_target_removed_from_json_disappears(tmp_path):
+    """Un regalo tolto da event-data.json (es. il vecchio regalo comune) sparisce al riavvio;
+    le quote uniche che lo includevano restano leggibili nel CSV con il nome salvato."""
+    with open(SEED, encoding="utf-8") as f:
+        data = json.load(f)
+    extra = dict(data["giftTargets"][0], id="extra", name="Dott. Extra")
+    bigger = tmp_path / "bigger-event-data.json"
+    bigger.write_text(json.dumps(dict(data, giftTargets=data["giftTargets"] + [extra])), encoding="utf-8")
+
+    with make_client(tmp_path, seed_file=str(bigger)) as c1:
+        assert len(c1.get("/api/gifts/targets").json()) == 10
+        c1.post("/api/gifts/pool", json={"donorName": "Nonna", "totalAmount": 15, "graduateIds": ["extra", "luisi"]})
+        v1 = c1.get("/api/state").json()["version"]
+
+    with make_client(tmp_path) as c2:
+        assert len(c2.get("/api/gifts/targets").json()) == 9
+        assert c2.get("/api/state").json()["version"] == v1 + 1
+        csv_head = c2.get("/api/export/gift-pool.csv", headers=ADMIN).text.splitlines()[0]
+        assert csv_head.endswith(";Dott. Extra")
 
 
 def test_gift_texts_updated_only_with_flag(tmp_path):
-    """Cambiare titolo/IBAN di un regalo nel JSON aggiorna il DB solo con GIFT_SYNC_UPDATE_TEXTS;
-    in ogni caso la quota raccolta non viene toccata."""
+    """Cambiare titolo/IBAN di un regalo nel JSON aggiorna il DB solo con GIFT_SYNC_UPDATE_TEXTS."""
     with open(SEED, encoding="utf-8") as f:
         data = json.load(f)
     for t in data["giftTargets"]:
         if t["id"] == "luisi":
             t["giftTitle"] = "Nuovo regalo di Fedele"
             t["iban"] = "IT00 A000 0000 0000 0000 0000 000"
-            t["targetAmount"] = 1200.0
     changed = tmp_path / "changed-event-data.json"
     changed.write_text(json.dumps(data), encoding="utf-8")
 
     with make_client(tmp_path) as c1:  # primo avvio con il seed originale
-        luisi = next(t for t in c1.get("/api/gifts/targets").json() if t["id"] == "luisi")
-        collected, v1 = luisi["collectedAmount"], c1.get("/api/state").json()["version"]
+        v1 = c1.get("/api/state").json()["version"]
 
     with make_client(tmp_path, seed_file=str(changed)) as c2:  # flag spento: nessuna modifica
         luisi = next(t for t in c2.get("/api/gifts/targets").json() if t["id"] == "luisi")
@@ -227,8 +372,6 @@ def test_gift_texts_updated_only_with_flag(tmp_path):
         luisi = next(t for t in c3.get("/api/gifts/targets").json() if t["id"] == "luisi")
         assert luisi["giftTitle"] == "Nuovo regalo di Fedele"
         assert luisi["iban"] == "IT00 A000 0000 0000 0000 0000 000"
-        assert luisi["targetAmount"] == 1200.0
-        assert luisi["collectedAmount"] == collected  # la quota raccolta resta
         assert c3.get("/api/state").json()["version"] == v1 + 1
 
     with make_client(tmp_path, seed_file=str(changed), update_gift_texts=True) as c4:
@@ -374,13 +517,28 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
     con = sqlite3.connect(path)
     con.execute("CREATE TABLE event_notifications (id INTEGER PRIMARY KEY, title VARCHAR(300), message TEXT, category VARCHAR(50), timestamp INTEGER)")
     con.execute("INSERT INTO event_notifications (title, message, category, timestamp) VALUES ('vecchia', 'm', 'Festa', 1)")
+    # prima versione dei regali: importi sui destinatari e tabella delle quote per singolo regalo
+    con.execute(
+        "CREATE TABLE gift_targets (id VARCHAR(64) PRIMARY KEY, name VARCHAR(200), specialization VARCHAR(200), "
+        "role_title VARCHAR(300), gift_title VARCHAR(300), gift_description TEXT, target_amount FLOAT NOT NULL, "
+        "collected_amount FLOAT NOT NULL, iban VARCHAR(64), iban_holder VARCHAR(200), satispay_url VARCHAR(300), "
+        "paypal_me_url VARCHAR(300), sort_order INTEGER)"
+    )
+    con.execute(
+        "INSERT INTO gift_targets VALUES ('gruppo', 'Regalo Comune', '', '', '', '', 4800, 300, 'IT..', 'Comitato', '', '', 0)"
+    )
+    con.execute("CREATE TABLE gift_contributions (id INTEGER PRIMARY KEY, donor_name VARCHAR(200), amount FLOAT)")
     con.commit(); con.close()
 
-    assert ensure_schema(make_engine(str(path))) == ["event_notifications.scheduled_at"]
+    assert ensure_schema(make_engine(str(path))) == [
+        "+event_notifications.scheduled_at", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
+    ]
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:
         notes = c.get("/api/notifications").json()
         assert [n["title"] for n in notes] == ["vecchia"] and notes[0]["scheduledAt"] is None
+        ids = [t["id"] for t in c.get("/api/gifts/targets").json()]
+        assert "gruppo" not in ids and len(ids) == 9  # il regalo comune sparisce, i 9 del JSON vengono inseriti
 
 
 def test_iban_validation_detects_placeholders():
@@ -393,6 +551,8 @@ def test_iban_validation_detects_placeholders():
     with open(SEED, encoding="utf-8") as f:
         data = json.load(f)
     issues = placeholder_gift_issues(data)
-    assert len(issues) == len(data["giftTargets"])  # tutti segnaposto, per ora
+    assert len(issues) == len(data["giftTargets"]) + 1  # tutti segnaposto, cassiere compreso
+    assert issues[0].startswith("cassiere")
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
+    data["giftCollector"]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     assert len(placeholder_gift_issues(data)) == len(data["giftTargets"]) - 1

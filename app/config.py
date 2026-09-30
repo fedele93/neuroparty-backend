@@ -19,8 +19,11 @@ class Settings:
     seed_demo_data: bool = field(default_factory=lambda: _bool(os.environ.get("SEED_DEMO_DATA"), False))
     # Token segreto per le azioni da organizzatore (invio notifiche, cancellazioni).
     admin_token: str = field(default_factory=lambda: os.environ.get("ADMIN_TOKEN", ""))
-    # Se true, al riavvio aggiorna anche testi/IBAN/obiettivo dei regali già in DB a partire dal JSON
-    # (le quote raccolte non vengono mai toccate). Di default aggiunge solo i regali mancanti.
+    # Token del cassiere (header X-Treasurer-Token): vede e gestisce le quote uniche e ne scarica
+    # il CSV, senza i poteri dell'organizzatore. Anche ADMIN_TOKEN è accettato su quegli endpoint.
+    treasurer_token: str = field(default_factory=lambda: os.environ.get("TREASURER_TOKEN", ""))
+    # Se true, al riavvio aggiorna anche testi/IBAN/link dei regali già in DB a partire dal JSON.
+    # Di default aggiunge solo i regali mancanti.
     gift_sync_update_texts: bool = field(default_factory=lambda: _bool(os.environ.get("GIFT_SYNC_UPDATE_TEXTS"), False))
     # Se impostata, l'API serve anche i file statici della PWA da questa cartella (utile in sviluppo).
     pwa_dir: str = field(default_factory=lambda: os.environ.get("PWA_DIR", ""))

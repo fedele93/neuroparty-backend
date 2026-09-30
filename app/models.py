@@ -1,8 +1,8 @@
 """Tabelle del database: rispecchiano 1:1 le entità Room dell'app Android."""
 import time
 
-from sqlalchemy import Boolean, Float, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 
@@ -110,6 +110,8 @@ class SharedPhoto(Base):
 
 
 class GiftTarget(Base):
+    """Neo-specialista destinatario di un regalo, con le coordinate per donargli direttamente.
+    Nessun importo: obiettivi e cifre raccolte non vengono né registrati né mostrati."""
     __tablename__ = "gift_targets"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
@@ -117,8 +119,6 @@ class GiftTarget(Base):
     role_title: Mapped[str] = mapped_column(String(300), default="")
     gift_title: Mapped[str] = mapped_column(String(300), default="")
     gift_description: Mapped[str] = mapped_column(Text, default="")
-    target_amount: Mapped[float] = mapped_column(Float, default=0.0)
-    collected_amount: Mapped[float] = mapped_column(Float, default=0.0)
     iban: Mapped[str] = mapped_column(String(64), default="")
     iban_holder: Mapped[str] = mapped_column(String(200), default="")
     satispay_url: Mapped[str] = mapped_column(String(300), default="")
@@ -133,8 +133,6 @@ class GiftTarget(Base):
             "roleTitle": self.role_title,
             "giftTitle": self.gift_title,
             "giftDescription": self.gift_description,
-            "targetAmount": self.target_amount,
-            "collectedAmount": self.collected_amount,
             "iban": self.iban,
             "ibanHolder": self.iban_holder,
             "satispayUrl": self.satispay_url,
@@ -142,30 +140,64 @@ class GiftTarget(Base):
         }
 
 
-class GiftContribution(Base):
-    __tablename__ = "gift_contributions"
+POOL_STATUS_PENDING = "PENDING"
+POOL_STATUS_RECEIVED = "RECEIVED"
+
+
+class GiftPoolContribution(Base):
+    """Quota unica versata al cassiere (vedi "giftCollector" in event-data.json) e ripartita
+    fra i neo-specialisti. Visibile solo al cassiere/organizzatori e a chi l'ha registrata."""
+    __tablename__ = "gift_pool_contributions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     donor_name: Mapped[str] = mapped_column(String(200))
-    target_graduate_id: Mapped[str] = mapped_column(String(64))
-    target_graduate_name: Mapped[str] = mapped_column(String(200), default="")
-    amount: Mapped[float] = mapped_column(Float)
-    payment_method: Mapped[str] = mapped_column(String(50), default="IBAN")
+    contact: Mapped[str] = mapped_column(String(200), default="")
+    payment_method: Mapped[str] = mapped_column(String(20), default="IBAN")  # IBAN | PayPal | Contanti
+    split_mode: Mapped[str] = mapped_column(String(10), default="EQUAL")  # EQUAL | CUSTOM
+    total_amount: Mapped[float] = mapped_column(Float)
     note: Mapped[str] = mapped_column(Text, default="")
-    is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False)
-    contributed_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    status: Mapped[str] = mapped_column(String(20), default=POOL_STATUS_PENDING)
+    client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    received_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    allocations: Mapped[list["GiftPoolAllocation"]] = relationship(
+        back_populates="contribution",
+        cascade="all, delete-orphan",
+        order_by="GiftPoolAllocation.id",
+        lazy="selectin",
+    )
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "donorName": self.donor_name,
-            "targetGraduateId": self.target_graduate_id,
-            "targetGraduateName": self.target_graduate_name,
-            "amount": self.amount,
+            "contact": self.contact,
             "paymentMethod": self.payment_method,
+            "splitMode": self.split_mode,
+            "totalAmount": self.total_amount,
             "note": self.note,
-            "isAnonymous": self.is_anonymous,
-            "contributedAt": self.contributed_at,
+            "status": self.status,
+            "createdAt": self.created_at,
+            "receivedAt": self.received_at,
+            "allocations": [a.to_dict() for a in self.allocations],
         }
+
+
+class GiftPoolAllocation(Base):
+    """Parte di una quota unica destinata a un singolo neo-specialista."""
+    __tablename__ = "gift_pool_allocations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contribution_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("gift_pool_contributions.id", ondelete="CASCADE"), index=True
+    )
+    graduate_id: Mapped[str] = mapped_column(String(64))
+    graduate_name: Mapped[str] = mapped_column(String(200), default="")
+    amount: Mapped[float] = mapped_column(Float)
+
+    contribution: Mapped[GiftPoolContribution] = relationship(back_populates="allocations")
+
+    def to_dict(self) -> dict:
+        return {"graduateId": self.graduate_id, "graduateName": self.graduate_name, "amount": self.amount}
 
 
 class EventNotification(Base):
