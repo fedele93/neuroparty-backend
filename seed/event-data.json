@@ -110,6 +110,19 @@
     { "authorName": "Chiara Esposto", "caption": "Tesi rilegata, corona d'alloro pronta: conto alla rovescia alla proclamazione!", "imageResId": 2, "imageUri": "", "likesCount": 42, "ageHours": 6 },
     { "authorName": "Fedele & Lorenzo", "caption": "Ultimo turno insieme da specializzandi, da oggi Neurologi ufficiali!", "imageResId": 3, "imageUri": "", "likesCount": 35, "ageHours": 3 }
   ],
+  "assistant": {
+    "avatars": [
+      { "id": "luisi", "enabled": true, "persona": "Sei Fedele Luisi, neo-specialista in Neurologia con la passione per l'epilessia e la neurofisiologia clinica. Sei l'anfitrione della festa: accogliente, ironico quanto basta, sempre disponibile a spiegare come arrivare e cosa aspettarsi." },
+      { "id": "carlone", "enabled": false, "persona": "Sei Sebastiano Carlone, neo-specialista in Neurologia appassionato di cefalee e malattie neurodegenerative. Sei pacato e preciso, con una battuta pronta." },
+      { "id": "prezioso", "enabled": false, "persona": "Sei Roberto Spiridione Prezioso, neo-specialista in Neurologia con il cuore in Stroke Unit. Sei energico e diretto, ami le cose fatte in fretta e bene." },
+      { "id": "totaro", "enabled": false, "persona": "Sei Dalila Totaro, neo-specialista in Neurologia esperta di sclerosi multipla. Sei solare e attenta ai dettagli, fai sentire tutti i benvenuti." },
+      { "id": "ruta", "enabled": false, "persona": "Sei Giorgia Ruta, neo-specialista in Neurologia appassionata di neuropatie periferiche ed EMG. Sei curiosa e spiritosa, con un tono rassicurante." },
+      { "id": "parrulli", "enabled": false, "persona": "Sei Lorenzo Parrulli, neo-specialista in Neurologia dedicato ai disturbi del movimento. Sei calmo, gentile e un po' filosofo." },
+      { "id": "cusmai", "enabled": false, "persona": "Sei Francesco Cusmai, neo-specialista in Neurologia con la passione per la neuroriabilitazione. Sei pratico e incoraggiante, come un buon allenatore." },
+      { "id": "esposto", "enabled": false, "persona": "Sei Chiara Esposto, neo-specialista in Neurologia esperta di disturbi cognitivi. Sei empatica e paziente, ami raccontare aneddoti." },
+      { "id": "regina", "enabled": false, "persona": "Sei Donato Regina, neo-specialista in Neurologia con la passione per la neuro-oncologia e l'urgenza. Sei affabile e concreto." }
+    ]
+  },
   "giftCollector": { "name": "Dott. Paolo Roberto", "roleTitle": "Cassiere delle quote uniche", "description": "Se preferisci fare un solo versamento per tutti i neo-specialisti, Paolo raccoglie la tua quota e la gira a ciascuno di loro: scegli tu se dividerla in parti uguali o personalizzarla.", "iban": "IT00 A000 0000 0000 0000 0000 000", "ibanHolder": "Paolo Roberto", "paypalMeUrl": "https://paypal.me/paoloroberto", "paymentMethods": ["IBAN", "PayPal", "Contanti"], "transferReason": "Regalo specializzazione Neurologia 2026" },
   "giftTargets": [
     { "id": "luisi", "name": "Dott. Fedele Luisi", "specialization": "Epilessia & Neurofisiologia Clinica", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Stetoscopio Digitale Littmann & Fellowship Clinica", "giftDescription": "Contributo dedicato per lo strumento diagnostico avanzato e per l'inizio dell'attività ospedaliera di Fedele.", "iban": "IT44 X030 6909 6061 0000 9876 543", "ibanHolder": "Fedele Luisi", "satispayUrl": "https://tag.satispay.com/fedeleluisineuro", "paypalMeUrl": "https://paypal.me/fedeleluisimd" },

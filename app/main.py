@@ -3,15 +3,18 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager, suppress
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .assistant import VoiceResolver
 from .config import Settings
 from .db import ensure_schema, make_engine, make_session_factory
+from .mistral import FakeMistralClient, MistralClient
 from .push import PushService
-from .routers import automation, bus, event, export, gifts, guests, notifications, photos, push, wishes
+from .routers import assistant, automation, bus, event, export, gifts, guests, notifications, photos, push, wishes
 from .scheduler import run_scheduler
 from .seed import load_event_file, seed_database
 from .validation import placeholder_gift_issues
@@ -37,10 +40,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with suppress(asyncio.CancelledError):
                 await task
             app.state.webhooks.close()
+            app.state.assistant.client.close()
 
     app = FastAPI(
         title="NeuroParty API",
-        version="1.3.0",
+        version="1.4.0",
         description="Backend condiviso per l'app Android e la PWA della festa di specializzazione in Neurologia.",
         lifespan=lifespan,
     )
@@ -62,6 +66,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.push = PushService(settings.vapid_key_path, settings.vapid_subject)
 
+    # Assistente vocale (Mistral): vedi app/assistant.py e app/routers/assistant.py
+    if settings.assistant_fake:
+        mistral = FakeMistralClient()
+        log.warning("ASSISTANT_FAKE attivo: l'assistente vocale usa il simulatore, non Mistral")
+    else:
+        mistral = MistralClient(
+            settings.mistral_api_key, settings.mistral_base_url,
+            settings.mistral_chat_model, settings.mistral_stt_model, settings.mistral_tts_model,
+        )
+    app.state.assistant = SimpleNamespace(client=mistral, voices=VoiceResolver(mistral, settings.assistant_fallback_voice_id))
+    if mistral.enabled:
+        log.info("Assistente vocale attivo (chat %s, trascrizione %s, voce %s)", mistral.chat_model, mistral.stt_model, mistral.tts_model)
+    else:
+        log.info("MISTRAL_API_KEY non impostata: assistente vocale disattivato")
+
     # Webhook verso n8n (vedi app/webhooks.py): disabilitati se N8N_WEBHOOK_URL è vuoto.
     app.state.webhooks = WebhookDispatcher(
         settings.n8n_webhook_url, settings.n8n_webhook_secret,
@@ -81,8 +100,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation):
+    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant):
         app.include_router(r.router)
+    app.include_router(assistant.admin)
 
     # Foto caricate dagli invitati
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")

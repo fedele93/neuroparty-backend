@@ -54,6 +54,20 @@ class Settings:
     # senza dare a n8n il token organizzatore. Vuoto = si usa solo ADMIN_TOKEN.
     automation_token: str = field(default_factory=lambda: os.environ.get("AUTOMATION_TOKEN", ""))
 
+    # ---- Assistente vocale (Mistral) ---------------------------------------------------
+    # Chiave API Mistral: trascrizione (Voxtral), conversazione (chat con function calling) e
+    # sintesi vocale con voci clonate. Vuota = assistente disattivato. Vedi app/mistral.py.
+    mistral_api_key: str = field(default_factory=lambda: os.environ.get("MISTRAL_API_KEY", "").strip())
+    mistral_base_url: str = field(default_factory=lambda: os.environ.get("MISTRAL_BASE_URL", "https://api.mistral.ai").rstrip("/"))
+    mistral_chat_model: str = field(default_factory=lambda: os.environ.get("MISTRAL_CHAT_MODEL", "mistral-small-latest"))
+    mistral_stt_model: str = field(default_factory=lambda: os.environ.get("MISTRAL_STT_MODEL", "voxtral-mini-latest"))
+    mistral_tts_model: str = field(default_factory=lambda: os.environ.get("MISTRAL_TTS_MODEL", "voxtral-mini-tts-2603"))
+    # Voce preimpostata di Mistral usata dagli avatar senza campione vocale ("voce di fantasia").
+    # Vuota = la prima voce preimpostata restituita dall'API.
+    assistant_fallback_voice_id: str = field(default_factory=lambda: os.environ.get("ASSISTANT_FALLBACK_VOICE_ID", "").strip())
+    # true = simulatore locale al posto di Mistral (nessuna rete, nessun costo): per sviluppo e test e2e.
+    assistant_fake: bool = field(default_factory=lambda: _bool(os.environ.get("ASSISTANT_FAKE"), False))
+
     @property
     def db_path(self) -> str:
         return os.path.join(self.data_dir, "neuroparty.db")
@@ -65,3 +79,8 @@ class Settings:
     @property
     def vapid_key_path(self) -> str:
         return os.path.join(self.data_dir, "vapid_private.pem")
+
+    @property
+    def voices_dir(self) -> str:
+        """Campioni vocali degli avatar caricati dagli organizzatori."""
+        return os.path.join(self.data_dir, "voices")

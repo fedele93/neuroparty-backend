@@ -200,6 +200,62 @@ class GiftPoolAllocation(Base):
         return {"graduateId": self.graduate_id, "graduateName": self.graduate_name, "amount": self.amount}
 
 
+class AssistantAvatar(Base):
+    """Avatar dell'assistente vocale: uno per neo-specialista. È selezionabile dagli invitati
+    solo se abilitato e con una voce (clonata dal campione caricato dagli organizzatori,
+    oppure una voce preimpostata di Mistral come "voce di fantasia")."""
+    __tablename__ = "assistant_avatars"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # stesso id del regalo/neo-specialista
+    name: Mapped[str] = mapped_column(String(200))
+    persona: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    voice_id: Mapped[str | None] = mapped_column(String(128), nullable=True)  # voce clonata su Mistral
+    voice_name: Mapped[str] = mapped_column(String(200), default="")
+    preset_voice_id: Mapped[str | None] = mapped_column(String(128), nullable=True)  # voce preimpostata scelta
+    sample_filename: Mapped[str] = mapped_column(String(200), default="")
+    sample_uploaded_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+    @property
+    def short_name(self) -> str:
+        import re
+
+        return re.sub(r"^Dott\.(ssa)?\s*", "", self.name, flags=re.IGNORECASE)
+
+    def voice_kind(self, fallback_available: bool) -> str:
+        if self.voice_id:
+            return "clonata"
+        if self.preset_voice_id or fallback_available:
+            return "preimpostata"
+        return "nessuna"
+
+    def is_ready(self, fallback_available: bool) -> bool:
+        return self.enabled and self.voice_kind(fallback_available) != "nessuna"
+
+    def to_public(self, fallback_available: bool) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "shortName": self.short_name,
+            "persona": self.persona,
+            "voiceKind": self.voice_kind(fallback_available),
+        }
+
+    def to_admin(self, fallback_available: bool) -> dict:
+        return {
+            **self.to_public(fallback_available),
+            "enabled": self.enabled,
+            "ready": self.is_ready(fallback_available),
+            "voiceId": self.voice_id,
+            "voiceName": self.voice_name,
+            "presetVoiceId": self.preset_voice_id,
+            "sampleFilename": self.sample_filename,
+            "sampleUploadedAt": self.sample_uploaded_at,
+            "updatedAt": self.updated_at,
+        }
+
+
 class EventNotification(Base):
     __tablename__ = "event_notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

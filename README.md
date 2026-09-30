@@ -28,6 +28,7 @@ arrivano davvero a tutti.
 | Sottoscrizione push del browser | `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` |
 | Automazioni con **n8n**: report pronto per mail (JSON/testo/HTML), stato dei webhook, test | `GET /api/automation/report[.txt|.html]`, `GET /api/automation/status`, `POST /api/automation/webhook-test` (token automazioni o organizzatori) |
 | Sincronizzazione app Android in una chiamata | `GET /api/snapshot`, `GET /api/state` |
+| **Assistente vocale** con gli avatar dei neo-specialisti (Mistral: trascrizione, chat con azioni sull'app, voce clonata) | `GET /api/assistant/avatars`, `POST /api/assistant/talk`; pannello organizzatori `/api/assistant/admin/...` |
 
 Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
 
@@ -98,6 +99,7 @@ nano .env
 | `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
 | `TREASURER_TOKEN` | token per il cassiere delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni |
+| `MISTRAL_API_KEY` | chiave API Mistral per l'assistente vocale (vuota = assistente spento); vedi *Assistente vocale* |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
 | `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `N8N_WEBHOOK_EVENTS`, `AUTOMATION_TOKEN` | opzionali, per collegare n8n (vedi *Automazioni con n8n*) |
@@ -234,6 +236,45 @@ Nella cartella [`n8n/`](n8n/README.md) ci sono due workflow pronti da importare:
 giornaliero via mail** (Schedule → HTTP Request → Send Email) e **avvisi in tempo reale**
 (Webhook → Code → Send Email), con le istruzioni per compilarli.
 
+## Assistente vocale con avatar
+
+Nella PWA un pulsante rotondo in basso a sinistra apre l'assistente: si sceglie un avatar (uno
+dei neo-specialisti), si tiene premuto per parlare oppure si scrive, e l'avatar risponde in
+italiano, con tono gentile, sia per iscritto sia a voce. Conosce programma, orari, luoghi,
+navetta e regali (senza cifre) e può agire sull'app: dire quanti posti restano sulla navetta,
+cercare un invitato, confermare o modificare un RSVP, prenotare la navetta, pubblicare un
+augurio, aprire una sezione. Prima di ogni azione che scrive dati riassume e chiede conferma.
+
+Tutto passa dal server (app/assistant.py, app/routers/assistant.py) usando le API Mistral con
+`MISTRAL_API_KEY` nel `.env`: la chiave non arriva mai ai telefoni.
+
+| Passo | API Mistral | Modello (variabile) |
+|---|---|---|
+| Trascrizione della registrazione | `POST /v1/audio/transcriptions` (`language: it`) | `MISTRAL_STT_MODEL` = `voxtral-mini-latest` |
+| Conversazione e azioni (function calling) | `POST /v1/chat/completions` con `tools` | `MISTRAL_CHAT_MODEL` = `mistral-small-latest` |
+| Voce dell'avatar | `POST /v1/audio/speech` (MP3) | `MISTRAL_TTS_MODEL` = `voxtral-mini-tts-2603` |
+| Clonazione della voce da un campione | `POST /v1/audio/voices` (campione in base64) | - |
+
+**Avatar.** Ne esiste uno per neo-specialista (stessi id dei regali, `assistant.avatars` in
+`seed/event-data.json` per persona e abilitazione iniziali; poi comanda il pannello). Un avatar
+è selezionabile dagli invitati solo se è **abilitato** e ha una **voce**: quella clonata dal
+campione caricato dagli organizzatori, una voce preimpostata di Mistral scelta per lui, oppure
+la voce di riserva (`ASSISTANT_FALLBACK_VOICE_ID`, di default la prima voce preimpostata
+restituita dall'API). All'inizio è attivo solo Fedele, con la voce di riserva.
+
+**Pannello organizzatori** (PWA -> ⚙️ Impostazioni -> Assistente vocale, con il token): per ogni
+avatar si scrive la persona, si abilita, si sceglie la voce preimpostata, si carica o registra
+un campione di voce (5-15 secondi di parlato pulito, con il consenso della persona) che viene
+clonato su Mistral, si riascolta il campione e si prova la voce su una frase.
+
+**Simulatore.** Con `ASSISTANT_FAKE=true` il server non chiama Mistral: trascrizione, risposte
+e audio sono finti ma il flusso completo (strumenti compresi) funziona, senza costi. Lo usano i
+test automatici e serve per provare la PWA in locale.
+
+**Costi indicativi** (listino Mistral, settembre 2026): sintesi vocale 16 $ per milione di
+caratteri, chat e trascrizione pochi centesimi per conversazione. Nessun limite lato server:
+chi ha la chiave vede i consumi nella console Mistral.
+
 ## Dati dell'evento
 
 `seed/event-data.json` contiene programma, mappa, orari navetta, laureandi, la lista dei
@@ -312,7 +353,9 @@ app/
   webhooks.py      webhook in uscita verso n8n (eventi, firma HMAC, tentativi ripetuti)
   report.py        report per gli organizzatori (JSON, testo, HTML) usato da n8n
   validation.py    controllo IBAN (segnalazione dei segnaposto)
-  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event, export, automation
+  routers/         un file per area: guests, bus, wishes, photos, gifts, notifications, push, event, export, automation, assistant
+  assistant.py     assistente vocale: prompt con i dati della festa, strumenti che agiscono sull'app, ciclo di conversazione
+  mistral.py       client HTTP per le API Mistral (trascrizione, chat, voce, voci clonate) e simulatore locale
 seed/event-data.json
 n8n/               workflow n8n di esempio (report via mail, avvisi in tempo reale) + guida
 tests/             pytest (30 test)
