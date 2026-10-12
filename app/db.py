@@ -32,6 +32,7 @@ def make_session_factory(engine):
 # quindi su un database già in uso le aggiungiamo con ALTER TABLE (SQLite lo supporta).
 ADDED_COLUMNS = {
     "event_notifications": {"scheduled_at": "INTEGER"},
+    "gift_pool_contributions": {"collector_id": "VARCHAR(64) NOT NULL DEFAULT ''", "collector_name": "VARCHAR(200) NOT NULL DEFAULT ''"},
 }
 
 # Residui della prima versione dei regali (importi raccolti e quote per singolo destinatario),

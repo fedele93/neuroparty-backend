@@ -13,8 +13,9 @@ def test_health_and_event(client):
     assert len(ev["graduates"]) == 9
     assert ev["meta"]["maxBusSeats"] == 54
     assert len(ev["program"]["timeline"]) == 5
-    assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"
-    assert ev["giftCollector"]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
+    assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
+    assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
+    assert ev["giftCollectors"][1]["name"] == "Dott. Aki" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
 
 
 def test_demo_seed_matches_json(client):
@@ -114,6 +115,7 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
     collector = client.get("/api/gifts/collector").json()
     assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
     assert "Satispay" not in collector["paymentMethods"]
+    assert [c["name"] for c in client.get("/api/gifts/collectors").json()] == ["Dott. Paolo Roberto", "Dott. Aki"]
     # elenco e stato riservati al cassiere/organizzatori
     assert client.get("/api/gifts/pool").status_code == 403
     assert client.get("/api/gifts/pool", headers={"X-Treasurer-Token": "sbagliato"}).status_code == 403
@@ -136,7 +138,13 @@ def test_pool_equal_split(client):
     assert c["allocations"][0]["amount"] == 11.12 and c["allocations"][1]["amount"] == 11.11
     assert round(sum(a["amount"] for a in c["allocations"]), 2) == 100
     assert c["allocations"][0] == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 11.12}
+    assert c["collectorId"] == "roberto" and c["collectorName"] == "Dott. Paolo Roberto"  # cassiere di default
     assert client.get("/api/state").json()["version"] == v0 + 1
+
+    # quota versata al secondo cassiere
+    r = client.post("/api/gifts/pool", json={"donorName": "Cugina", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "PayPal"})
+    assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Aki"
+    assert client.post("/api/gifts/pool", json={"donorName": "X", "totalAmount": 45, "collectorId": "nessuno"}).status_code == 404
 
     # solo alcuni neo-specialisti (es. escludo me stesso)
     r = client.post("/api/gifts/pool", json={"donorName": "Fedele", "totalAmount": 80, "graduateIds": ["carlone", "totaro"]})
@@ -201,6 +209,11 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert luisi == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 80, "receivedAmount": 20, "contributions": 3}
         assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 150, "Contanti": 90}
         assert board["contributions"][0]["donorName"] == "Amici del corso"  # la più recente per prima
+        # sezioni per cassiere: Paolo ha 2 quote (330 €), Aki 1 (90 € in contanti)
+        assert [x["id"] for x in board["collectors"]] == ["roberto", "aki"]
+        by_c = {x["collectorId"]: x for x in s["byCollector"]}
+        assert by_c["roberto"]["totalAmount"] == 330 and by_c["aki"]["totalAmount"] == 90 and by_c["aki"]["contributions"] == 1
+        assert next(g for g in by_c["aki"]["byGraduate"] if g["graduateId"] == "luisi")["amount"] == 10
 
         # il cassiere segna come ricevuta la quota PayPal
         paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal")
@@ -216,26 +229,69 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert c.post("/api/notifications", json={"title": "a", "message": "b"}, headers=TREASURER).status_code == 403
         assert c.get("/api/export/guests.csv", headers=TREASURER).status_code == 403
 
-        # CSV: una colonna per neo-specialista e righe dei totali; importi con la virgola
+        # CSV: cassiere in seconda colonna, una colonna per neo-specialista, totali per cassiere e complessivi; virgola decimale
         for headers in (TREASURER, ADMIN, {"X-Automation-Token": "n8n-test"}):
             r = c.get("/api/export/gift-pool.csv", headers=headers)
             assert r.status_code == 200
         assert 'filename="quote-uniche.csv"' in r.headers["content-disposition"]
         lines = r.text.lstrip("\ufeff").splitlines()
         head = lines[0].split(";")
-        assert head[:9] == ["Data", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
-        assert head[9:] == [t["name"] for t in c.get("/api/gifts/targets").json()]
-        assert len(lines) == 1 + 3 + 2
-        rows = {ln.split(";")[1]: ln.split(";") for ln in lines[1:4]}
-        assert rows["Colleghi Reparto Stroke"][3:7] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
-        assert rows["Colleghi Reparto Stroke"][9] == "50,00" and rows["Colleghi Reparto Stroke"][10] == ""  # luisi, carlone
-        assert rows["Amici del corso"][5:7] == ["90,00", "In attesa"] and rows["Amici del corso"][9] == "10,00"
-        assert lines[4].split(";")[:6] == ["TOTALE", "", "", "", "", "420,00"] and lines[4].split(";")[9] == "80,00"
-        assert lines[5].split(";")[:6] == ["DI CUI RICEVUTO", "", "", "", "", "330,00"] and lines[5].split(";")[9] == "70,00"
+        assert head[:10] == ["Data", "Cassiere", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
+        assert head[10:] == [t["name"] for t in c.get("/api/gifts/targets").json()]
+        assert len(lines) == 1 + 3 + 2 + 2  # intestazione, 3 quote, 2 totali per cassiere, totale e ricevuto
+        rows = {ln.split(";")[2]: ln.split(";") for ln in lines[1:4]}
+        assert rows["Colleghi Reparto Stroke"][1] == "Dott. Paolo Roberto"
+        assert rows["Colleghi Reparto Stroke"][4:8] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
+        assert rows["Colleghi Reparto Stroke"][10] == "50,00" and rows["Colleghi Reparto Stroke"][11] == ""  # luisi, carlone
+        assert rows["Amici del corso"][1] == "Dott. Aki" and rows["Amici del corso"][6:8] == ["90,00", "In attesa"] and rows["Amici del corso"][10] == "10,00"
+        assert lines[4].split(";")[0] == "TOTALE DOTT. PAOLO ROBERTO" and lines[4].split(";")[6] == "330,00"
+        assert lines[5].split(";")[0] == "TOTALE DOTT. AKI" and lines[5].split(";")[6] == "90,00" and lines[5].split(";")[10] == "10,00"
+        assert lines[6].split(";")[:7] == ["TOTALE", "", "", "", "", "", "420,00"] and lines[6].split(";")[10] == "80,00"
+        assert lines[7].split(";")[:7] == ["DI CUI RICEVUTO", "", "", "", "", "", "330,00"] and lines[7].split(";")[10] == "70,00"
 
     with make_client(tmp_path / "b", admin_token="", treasurer_token="") as c:
         assert c.get("/api/gifts/pool", headers=TREASURER).status_code == 503
         assert c.get("/api/state").json()["treasurerEnabled"] is False
+
+
+def test_per_collector_treasurer_token_sees_only_own_quotas(tmp_path, monkeypatch):
+    """TREASURER_TOKEN_AKI: Aki vede, segna e scarica solo le quote versate a lui."""
+    from app.config import Settings
+
+    monkeypatch.setenv("TREASURER_TOKEN_AKI", "aki-secret")
+    assert Settings().treasurer_tokens == {"aki": "aki-secret"}
+    AKI = {"X-Treasurer-Token": "aki-secret"}
+    with make_client(tmp_path, treasurer_token="") as c:
+        c.app.state.settings.treasurer_tokens = {"aki": "aki-secret"}
+        assert c.get("/api/state").json()["treasurerEnabled"] is True
+        board = c.get("/api/gifts/pool", headers=AKI).json()
+        assert [x["id"] for x in board["collectors"]] == ["aki"]
+        assert [k["donorName"] for k in board["contributions"]] == ["Amici del corso"]
+        assert board["summary"]["totalAmount"] == 90 and [x["collectorId"] for x in board["summary"]["byCollector"]] == ["aki"]
+        paolo_quota = next(k for k in c.get("/api/gifts/pool", headers=ADMIN).json()["contributions"] if k["collectorId"] == "roberto")
+        assert c.patch(f"/api/gifts/pool/{paolo_quota['id']}/status", json={"status": "RECEIVED"}, headers=AKI).status_code == 403
+        assert c.delete(f"/api/gifts/pool/{paolo_quota['id']}", headers=AKI).status_code == 403
+        mine = board["contributions"][0]
+        assert c.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "RECEIVED"}, headers=AKI).status_code == 200
+        lines = c.get("/api/export/gift-pool.csv", headers=AKI).text.lstrip("\ufeff").splitlines()
+        assert len(lines) == 1 + 1 + 2 and all("Dott. Aki" in ln or ln.startswith(("Data;", "TOTALE", "DI CUI")) for ln in lines)
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "sbagliato"}).status_code == 403
+        assert c.delete(f"/api/gifts/pool/{mine['id']}", headers=AKI).status_code == 204  # il suo cassiere può sempre
+
+
+def test_legacy_pool_rows_belong_to_first_collector(tmp_path):
+    """Quote registrate prima dei cassieri multipli (collector_id vuoto) contano per il primo cassiere."""
+    import sqlite3
+
+    with make_client(tmp_path, demo=False) as c:
+        c.post("/api/gifts/pool", json={"donorName": "Vecchia", "totalAmount": 9})
+    con = sqlite3.connect(tmp_path / "data" / "neuroparty.db")
+    con.execute("UPDATE gift_pool_contributions SET collector_id = '', collector_name = ''")
+    con.commit(); con.close()
+    with make_client(tmp_path, demo=False) as c:
+        board = c.get("/api/gifts/pool", headers=ADMIN).json()
+        assert board["contributions"][0]["collectorId"] == "roberto" and board["contributions"][0]["collectorName"] == "Dott. Paolo Roberto"
+        assert next(x for x in board["summary"]["byCollector"] if x["collectorId"] == "roberto")["contributions"] == 1
 
 
 def test_photo_upload_resizes_and_serves(client):
@@ -532,7 +588,7 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
 
     assert ensure_schema(make_engine(str(path))) == [
         "+event_notifications.scheduled_at", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
-    ]
+    ]  # gift_pool_contributions non esiste ancora: create_all la crea già con le colonne del cassiere
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:
         notes = c.get("/api/notifications").json()
@@ -551,8 +607,9 @@ def test_iban_validation_detects_placeholders():
     with open(SEED, encoding="utf-8") as f:
         data = json.load(f)
     issues = placeholder_gift_issues(data)
-    assert len(issues) == len(data["giftTargets"]) + 1  # tutti segnaposto, cassiere compreso
-    assert issues[0].startswith("cassiere")
+    assert len(issues) == len(data["giftTargets"]) + 2  # tutti segnaposto, due cassieri compresi
+    assert issues[0].startswith("cassiere 'roberto'") and issues[1].startswith("cassiere 'aki'")
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
-    data["giftCollector"]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
+    for c in data["giftCollectors"]:
+        c["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     assert len(placeholder_gift_issues(data)) == len(data["giftTargets"]) - 1

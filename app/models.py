@@ -145,10 +145,12 @@ POOL_STATUS_RECEIVED = "RECEIVED"
 
 
 class GiftPoolContribution(Base):
-    """Quota unica versata al cassiere (vedi "giftCollector" in event-data.json) e ripartita
-    fra i neo-specialisti. Visibile solo al cassiere/organizzatori e a chi l'ha registrata."""
+    """Quota unica versata a uno dei cassieri (vedi "giftCollectors" in event-data.json) e ripartita
+    fra i neo-specialisti. Visibile solo al suo cassiere/organizzatori e a chi l'ha registrata."""
     __tablename__ = "gift_pool_contributions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    collector_id: Mapped[str] = mapped_column(String(64), default="")  # vuoto = primo cassiere del JSON
+    collector_name: Mapped[str] = mapped_column(String(200), default="")
     donor_name: Mapped[str] = mapped_column(String(200))
     contact: Mapped[str] = mapped_column(String(200), default="")
     payment_method: Mapped[str] = mapped_column(String(20), default="IBAN")  # IBAN | PayPal | Contanti
@@ -170,6 +172,8 @@ class GiftPoolContribution(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "collectorId": self.collector_id,
+            "collectorName": self.collector_name,
             "donorName": self.donor_name,
             "contact": self.contact,
             "paymentMethod": self.payment_method,

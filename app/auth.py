@@ -6,8 +6,9 @@
   (invitato, prenotazione bus) può poi modificarlo o cancellarlo.
 - X-Automation-Token: token di sola lettura per le automazioni (n8n): report, riepiloghi,
   export CSV. Anche X-Admin-Token è accettato su questi endpoint.
-- X-Treasurer-Token: token del cassiere delle quote uniche (TREASURER_TOKEN): elenco e stato
-  delle quote, CSV. Anche X-Admin-Token è accettato su questi endpoint.
+- X-Treasurer-Token: token dei cassieri delle quote uniche (TREASURER_TOKEN per tutti, oppure
+  TREASURER_TOKEN_<ID> per un solo cassiere): elenco e stato delle quote, CSV. Anche
+  X-Admin-Token è accettato su questi endpoint.
 """
 import secrets
 
@@ -59,26 +60,50 @@ def _matches(given: str | None, expected: str) -> bool:
     return bool(given) and bool(expected) and secrets.compare_digest(given, expected)
 
 
+def treasurer_scope(
+    request: Request,
+    x_admin_token: str | None = Header(default=None),
+    x_treasurer_token: str | None = Header(default=None),
+) -> set[str] | None | bool:
+    """Chi è il chiamante per le quote uniche:
+    - None  = organizzatore o TREASURER_TOKEN: vede tutti i cassieri;
+    - set   = TREASURER_TOKEN_<ID>: vede solo quei cassieri;
+    - False = nessun token valido."""
+    settings = request.app.state.settings
+    if _matches(x_admin_token, settings.admin_token) or _matches(x_treasurer_token, settings.treasurer_token):
+        return None
+    for collector_id, token in settings.treasurer_tokens.items():
+        if _matches(x_treasurer_token, token):
+            return {collector_id}
+    return False
+
+
 def is_treasurer(
     request: Request,
     x_admin_token: str | None = Header(default=None),
     x_treasurer_token: str | None = Header(default=None),
 ) -> bool:
-    settings = request.app.state.settings
-    return _matches(x_admin_token, settings.admin_token) or _matches(x_treasurer_token, settings.treasurer_token)
+    return treasurer_scope(request, x_admin_token, x_treasurer_token) is not False
+
+
+def _any_treasurer_token(settings) -> bool:
+    return bool(settings.admin_token or settings.treasurer_token or settings.treasurer_tokens)
 
 
 def require_treasurer(
     request: Request,
     x_admin_token: str | None = Header(default=None),
     x_treasurer_token: str | None = Header(default=None),
-) -> None:
-    """Endpoint del cassiere delle quote uniche: TREASURER_TOKEN oppure ADMIN_TOKEN."""
+) -> set[str] | None:
+    """Endpoint del cassiere delle quote uniche: TREASURER_TOKEN, TREASURER_TOKEN_<ID> oppure ADMIN_TOKEN.
+    Ritorna i cassieri visibili (None = tutti)."""
     settings = request.app.state.settings
-    if not settings.admin_token and not settings.treasurer_token:
+    if not _any_treasurer_token(settings):
         raise HTTPException(status_code=503, detail="ADMIN_TOKEN/TREASURER_TOKEN non configurati sul server")
-    if not is_treasurer(request, x_admin_token, x_treasurer_token):
+    scope = treasurer_scope(request, x_admin_token, x_treasurer_token)
+    if scope is False:
         raise HTTPException(status_code=403, detail="Token cassiere o organizzatore non valido")
+    return scope
 
 
 def require_treasurer_or_automation(
@@ -86,14 +111,15 @@ def require_treasurer_or_automation(
     x_admin_token: str | None = Header(default=None),
     x_treasurer_token: str | None = Header(default=None),
     x_automation_token: str | None = Header(default=None),
-) -> None:
-    """Sola lettura (CSV delle quote uniche): cassiere, organizzatore o automazioni."""
+) -> set[str] | None:
+    """Sola lettura (CSV delle quote uniche): cassiere, organizzatore o automazioni. Ritorna i cassieri visibili."""
     settings = request.app.state.settings
-    if is_treasurer(request, x_admin_token, x_treasurer_token):
-        return
+    scope = treasurer_scope(request, x_admin_token, x_treasurer_token)
+    if scope is not False:
+        return scope
     if _matches(x_automation_token, settings.automation_token):
-        return
-    if not (settings.admin_token or settings.treasurer_token or settings.automation_token):
+        return None
+    if not (_any_treasurer_token(settings) or settings.automation_token):
         raise HTTPException(status_code=503, detail="Nessun token configurato sul server")
     raise HTTPException(status_code=403, detail="Token cassiere, organizzatore o automazioni non valido")
 

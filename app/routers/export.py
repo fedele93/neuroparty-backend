@@ -9,14 +9,15 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import require_automation, require_treasurer_or_automation
 from ..deps import get_db
-from ..models import POOL_STATUS_RECEIVED, BusBooking, GiftPoolContribution, GiftTarget, Guest
+from ..models import POOL_STATUS_RECEIVED, BusBooking, GiftTarget, Guest
+from .gifts import collectors_of, effective_collector_id, pool_rows_for
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -71,13 +72,16 @@ def export_bus(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/gift-pool.csv", dependencies=[Depends(require_treasurer_or_automation)])
-def export_gift_pool(db: Session = Depends(get_db)):
-    """Quote uniche per il cassiere: una riga per versamento, una colonna per neo-specialista
-    e le righe dei totali (complessivo e già ricevuto), così in Excel si legge subito quanto
-    spetta a ognuno."""
+@router.get("/gift-pool.csv")
+def export_gift_pool(request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer_or_automation)):
+    """Quote uniche per i cassieri: una riga per versamento (con il cassiere), una colonna per
+    neo-specialista e le righe dei totali per cassiere e complessivi (anche "già ricevuto"),
+    così in Excel si legge subito quanto spetta a ognuno. Con TREASURER_TOKEN_<ID> solo le
+    quote di quel cassiere."""
     targets = db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc(), GiftTarget.id.asc())).all()
-    rows = db.scalars(select(GiftPoolContribution).order_by(GiftPoolContribution.created_at.asc())).all()
+    collectors = collectors_of(request)
+    rows = sorted(pool_rows_for(db, scope, collectors), key=lambda c: c.created_at or 0)
+    names_c = {c["id"]: c["name"] for c in collectors}
     columns = [t.id for t in targets]
     names = {t.id: t.name for t in targets}
     # neo-specialisti presenti solo nelle quote (es. rimossi dal JSON dopo il versamento)
@@ -89,25 +93,35 @@ def export_gift_pool(db: Session = Depends(get_db)):
 
     totals = {g: 0.0 for g in columns}
     received = {g: 0.0 for g in columns}
+    per_collector: dict[str, dict] = {}
     data = []
     for c in rows:
+        cid = effective_collector_id(c, collectors)
+        cname = c.collector_name or names_c.get(cid, cid)
         per = {a.graduate_id: a.amount for a in c.allocations}
         is_received = c.status == POOL_STATUS_RECEIVED
+        pc = per_collector.setdefault(cid, {"name": cname, "total": 0.0, "received": 0.0, "by": {g: 0.0 for g in columns}})
+        pc["total"] += c.total_amount
+        if is_received:
+            pc["received"] += c.total_amount
         for g, amount in per.items():
             totals[g] += amount
+            pc["by"][g] = pc["by"].get(g, 0.0) + amount
             if is_received:
                 received[g] += amount
         data.append([
-            _fmt_ts(c.created_at), c.donor_name, c.contact, c.payment_method, SPLIT_LABELS.get(c.split_mode, c.split_mode),
+            _fmt_ts(c.created_at), cname, c.donor_name, c.contact, c.payment_method, SPLIT_LABELS.get(c.split_mode, c.split_mode),
             _fmt_amount(c.total_amount), POOL_STATUS_LABELS.get(c.status, c.status), _fmt_ts(c.received_at), c.note,
             *[_fmt_amount(per.get(g)) for g in columns],
         ])
-    fixed = ["Data", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
+    fixed = ["Data", "Cassiere", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
+    blanks = [""] * 8
+    if len(per_collector) > 1:
+        for pc in per_collector.values():
+            data.append([f"TOTALE {pc['name'].upper()}", "", *blanks[:4], _fmt_amount(pc["total"]), "", "", "",
+                         *[_fmt_amount(pc["by"].get(g, 0.0)) for g in columns]])
     total_all = sum(c.total_amount for c in rows)
     total_received = sum(c.total_amount for c in rows if c.status == POOL_STATUS_RECEIVED)
-    data.append(["TOTALE", "", "", "", "", _fmt_amount(total_all), "", "", "", *[_fmt_amount(totals[g]) for g in columns]])
-    data.append([
-        "DI CUI RICEVUTO", "", "", "", "", _fmt_amount(total_received), "", "", "",
-        *[_fmt_amount(received[g]) for g in columns],
-    ])
+    data.append(["TOTALE", "", *blanks[:4], _fmt_amount(total_all), "", "", "", *[_fmt_amount(totals[g]) for g in columns]])
+    data.append(["DI CUI RICEVUTO", "", *blanks[:4], _fmt_amount(total_received), "", "", "", *[_fmt_amount(received[g]) for g in columns]])
     return _csv_response("quote-uniche.csv", fixed + [names[g] for g in columns], data)

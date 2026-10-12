@@ -98,7 +98,7 @@ nano .env
 | `ADMIN_TOKEN` | stringa segreta lunga (`openssl rand -hex 24`) |
 | `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
-| `TREASURER_TOKEN` | token per il cassiere delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni |
+| `TREASURER_TOKEN` | token dei cassieri delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni; `TREASURER_TOKEN_<ID>` (es. `TREASURER_TOKEN_AKI`) limita la vista a un solo cassiere |
 | `MISTRAL_API_KEY` | chiave API Mistral per l'assistente vocale (vuota = assistente spento); vedi *Assistente vocale* |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
@@ -303,14 +303,17 @@ timeline, mappa, navetta e il file calendario si aggiornano da soli.
 
 La sezione Regali non mostra mai cifre raccolte o obiettivi: chi vuole donare a un singolo
 neo-specialista trova nella sua card l'IBAN da copiare e i link PayPal e Satispay, senza
-registrare nulla. Chi preferisce fare **un solo versamento** lo fa al **cassiere**
-(`giftCollector` nel JSON: nome, IBAN, PayPal, causale suggerita; metodi ammessi IBAN, PayPal
-e contanti), scegliendo se dividere la quota in parti uguali fra i neo-specialisti o
-personalizzarla. Queste quote vengono registrate sul server con la ripartizione e sono
-visibili solo al cassiere e agli organizzatori: nella PWA, inserendo `TREASURER_TOKEN` in
-⚙️ Impostazioni, la tab Regali mostra il cruscotto (quanto spetta a ciascuno, elenco delle
-quote, stato "ricevuta") e il pulsante per scaricare `quote-uniche.csv`, con una colonna per
-neo-specialista e le righe dei totali, pronto per Excel. Ogni dispositivo può cancellare la
+registrare nulla. Chi preferisce fare **un solo versamento** lo fa a uno dei **cassieri**
+(`giftCollectors` nel JSON, oggi Dott. Paolo Roberto e Dott. Aki: id, nome, IBAN, PayPal, causale
+suggerita; metodi ammessi IBAN, PayPal e contanti), scegliendo se dividere la quota in parti
+uguali fra i neo-specialisti o personalizzarla. Queste quote vengono registrate sul server con
+il cassiere e la ripartizione e sono visibili solo ai cassieri e agli organizzatori: nella PWA,
+inserendo il token in ⚙️ Impostazioni, la tab Regali mostra il cruscotto (una sezione per
+cassiere con quanto spetta a ciascun neo-specialista, elenco delle quote, stato "ricevuta") e il
+pulsante per scaricare `quote-uniche.csv`, con la colonna del cassiere, una colonna per
+neo-specialista e le righe dei totali per cassiere e complessivi, pronto per Excel.
+`TREASURER_TOKEN` vede tutti i cassieri; `TREASURER_TOKEN_<ID>` (es. `TREASURER_TOKEN_AKI`) solo
+le quote versate a quel cassiere. Ogni dispositivo può cancellare la
 propria quota finché il cassiere non l'ha segnata come ricevuta.
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti

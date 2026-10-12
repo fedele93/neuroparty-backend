@@ -22,6 +22,11 @@ class Settings:
     # Token del cassiere (header X-Treasurer-Token): vede e gestisce le quote uniche e ne scarica
     # il CSV, senza i poteri dell'organizzatore. Anche ADMIN_TOKEN è accettato su quegli endpoint.
     treasurer_token: str = field(default_factory=lambda: os.environ.get("TREASURER_TOKEN", ""))
+    # Token per singolo cassiere: TREASURER_TOKEN_<ID> (id in maiuscolo, es. TREASURER_TOKEN_AKI) vede e
+    # gestisce solo le quote versate a quel cassiere. TREASURER_TOKEN vede tutto.
+    treasurer_tokens: dict = field(default_factory=lambda: {
+        k[len("TREASURER_TOKEN_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("TREASURER_TOKEN_") and v.strip()
+    })
     # Se true, al riavvio aggiorna anche testi/IBAN/link dei regali già in DB a partire dal JSON.
     # Di default aggiunge solo i regali mancanti.
     gift_sync_update_texts: bool = field(default_factory=lambda: _bool(os.environ.get("GIFT_SYNC_UPDATE_TEXTS"), False))

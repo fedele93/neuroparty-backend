@@ -27,12 +27,13 @@ EMPTY_EVENT = {
     "program": {"badge": "", "title": "", "subtitle": "", "dateLabel": "", "locationLabel": "", "timeline": []},
     "busSchedule": {"subtitle": "", "andata": {}, "ritorno": {}, "pickupStops": []},
     "mapPoints": [],
-    "giftCollector": {},
+    "giftCollectors": [],
 }
 
-# Cassiere delle quote uniche: chi non vuole fare un bonifico per ogni neo-specialista versa
-# a lui una cifra sola, che poi ripartisce. Metodi ammessi: bonifico, PayPal e contanti.
+# Cassieri delle quote uniche: chi non vuole fare un bonifico per ogni neo-specialista versa
+# a uno di loro una cifra sola, che poi ripartisce. Metodi ammessi: bonifico, PayPal e contanti.
 COLLECTOR_DEFAULTS = {
+    "id": "",
     "name": "",
     "roleTitle": "Cassiere delle quote uniche",
     "description": "",
@@ -44,12 +45,27 @@ COLLECTOR_DEFAULTS = {
 }
 
 
+def gift_collectors_info(data: dict) -> list[dict]:
+    """Blocco "giftCollectors" del JSON (lista) completato con i valori di default; accetta anche il
+    vecchio "giftCollector" singolo. Ogni cassiere ha un id stabile (per le quote e i token)."""
+    raw = data.get("giftCollectors")
+    if raw is None:
+        single = data.get("giftCollector") or {}
+        raw = [single] if single else []
+    out = []
+    for i, c in enumerate(raw):
+        info = dict(COLLECTOR_DEFAULTS)
+        info.update({k: v for k, v in (c or {}).items() if v is not None})
+        info["id"] = str(info.get("id") or f"cassiere{i + 1}").strip().lower()
+        info["paymentMethods"] = [m for m in info["paymentMethods"] if m in ("IBAN", "PayPal", "Contanti")]
+        out.append(info)
+    return out
+
+
 def gift_collector_info(data: dict) -> dict:
-    """Blocco "giftCollector" del JSON completato con i valori di default."""
-    info = dict(COLLECTOR_DEFAULTS)
-    info.update({k: v for k, v in (data.get("giftCollector") or {}).items() if v is not None})
-    info["paymentMethods"] = [m for m in info["paymentMethods"] if m in ("IBAN", "PayPal", "Contanti")]
-    return info
+    """Il primo cassiere (compatibilità con i client che ne conoscono uno solo)."""
+    collectors = gift_collectors_info(data)
+    return collectors[0] if collectors else dict(COLLECTOR_DEFAULTS)
 
 
 def load_event_file(path: str) -> dict:
@@ -72,7 +88,8 @@ def public_event_info(data: dict) -> dict:
         "program": resolve_placeholders(data.get("program", EMPTY_EVENT["program"]), schedule),
         "busSchedule": resolve_placeholders(data.get("busSchedule", EMPTY_EVENT["busSchedule"]), schedule),
         "mapPoints": resolve_placeholders(data.get("mapPoints", []), schedule),
-        "giftCollector": gift_collector_info(data),
+        "giftCollector": gift_collector_info(data),  # primo cassiere (app Android 1.6)
+        "giftCollectors": gift_collectors_info(data),
     }
 
 
@@ -226,7 +243,9 @@ def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts
                 )
             )
         names = {t["id"]: t.get("name", "") for t in data.get("giftTargets", [])}
+        collectors = {c["id"]: c for c in gift_collectors_info(data)}
         for c in data.get("giftPoolContributions", []):
+            collector = collectors.get(c.get("collectorId")) or (next(iter(collectors.values())) if collectors else {})
             allocations = [
                 GiftPoolAllocation(
                     graduate_id=a["graduateId"],
@@ -239,6 +258,8 @@ def seed_database(db: Session, data: dict, include_demo: bool, update_gift_texts
             received = c.get("status", "PENDING") == "RECEIVED"
             db.add(
                 GiftPoolContribution(
+                    collector_id=collector.get("id", ""),
+                    collector_name=collector.get("name", ""),
                     donor_name=c["donorName"],
                     contact=c.get("contact", ""),
                     payment_method=c.get("paymentMethod", "IBAN"),

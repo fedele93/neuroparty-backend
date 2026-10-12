@@ -20,7 +20,7 @@ from .routers import bus as bus_router
 from .routers import guests as guests_router
 from .routers import wishes as wishes_router
 from .schemas import BookingIn, GuestIn, GuestUpdate, WishIn
-from .seed import gift_collector_info, public_event_info
+from .seed import gift_collectors_info, public_event_info
 
 log = logging.getLogger("neuroparty.assistant")
 
@@ -139,7 +139,10 @@ def event_facts(event_data: dict, max_seats: int) -> str:
     sch = ev["schedule"]
     prog = ev["program"]
     busd = ev["busSchedule"]
-    collector = gift_collector_info(event_data)
+    collectors = gift_collectors_info(event_data)
+    collectors_text = " oppure ".join(
+        f"{c.get('name') or ''} ({', '.join(c.get('paymentMethods', []))})" for c in collectors
+    ) or "un cassiere"
     lines = [
         f"Evento: {prog.get('title', '')} - {prog.get('subtitle', '')}.",
         f"Neo-specialisti festeggiati: {', '.join(ev.get('graduates', []))}.",
@@ -164,8 +167,8 @@ def event_facts(event_data: dict, max_seats: int) -> str:
         f"{busd.get('ritorno', {}).get('to', '')}. {busd.get('ritorno', {}).get('notes', '')}",
         f"- Fermate di salita: {', '.join(busd.get('pickupStops', []))}.",
         "Regali: nella sezione Regali dell'app ogni neo-specialista ha IBAN, PayPal e Satispay per un regalo diretto. "
-        f"Chi preferisce un solo versamento per tutti registra una quota unica al cassiere {collector.get('name') or ''} "
-        f"({', '.join(collector.get('paymentMethods', []))}), che la ripartisce fra i neo-specialisti. "
+        f"Chi preferisce un solo versamento per tutti registra una quota unica a uno dei cassieri, {collectors_text}, "
+        "che la ripartisce fra i neo-specialisti. "
         "Non esistono cifre suggerite né totali raccolti: se te lo chiedono, spiega che ognuno decide liberamente.",
     ]
     return "\n".join(lines)

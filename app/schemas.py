@@ -87,6 +87,7 @@ class PoolContributionIn(BaseModel):
     """Quota unica versata al cassiere e ripartita fra i neo-specialisti.
     - splitMode EQUAL: totalAmount diviso in parti uguali fra graduateIds (vuoto = tutti);
     - splitMode CUSTOM: allocations con un importo per neo-specialista (il totale è la somma)."""
+    collectorId: str = Field(default="", max_length=64)  # vuoto = primo cassiere
     donorName: str = Field(min_length=1, max_length=200)
     contact: str = Field(default="", max_length=200)
     paymentMethod: PoolPaymentMethod = "IBAN"
