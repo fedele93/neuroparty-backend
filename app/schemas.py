@@ -27,6 +27,54 @@ class GuestIn(BaseModel):
         return v
 
 
+MenuChoice = Literal["", "STANDARD", "VEGETARIANO", "VEGANO", "SENZA_GLUTINE", "ALTRO"]
+
+
+class CompanionIn(BaseModel):
+    name: str = Field(default="", max_length=200)
+    menu: MenuChoice = ""
+    notes: str = Field(default="", max_length=300)
+
+
+class ProfileLinkRequest(BaseModel):
+    """Richiesta del link personale: con l'email di un invitato già in lista, oppure email + nome per crearsi."""
+    email: str = Field(min_length=3, max_length=200)
+    fullName: str = Field(default="", max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def email_ok(cls, v: str) -> str:
+        v = _clean(v).lower()
+        if "@" not in v or "." not in v.split("@")[-1] or " " in v:
+            raise ValueError("Indirizzo email non valido")
+        return v
+
+
+class ProfileIn(BaseModel):
+    """Il profilo dell'invitato: dati personali, partecipazione, accompagnatori e menu."""
+    fullName: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="Invitato", max_length=100)
+    rsvpStatus: RsvpStatus = "CONFIRMED"
+    email: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=100)
+    menu: MenuChoice = ""
+    dietaryNotes: str = Field(default="", max_length=500)
+    companions: list[CompanionIn] = Field(default_factory=list, max_length=20)
+    consent: bool = False
+
+    @field_validator("fullName", "category", "email", "phone", "dietaryNotes")
+    @classmethod
+    def strip(cls, v: str, info) -> str:
+        v = _clean(v)
+        if info.field_name == "fullName" and not v:
+            raise ValueError("Il nome è obbligatorio")
+        if info.field_name == "email":
+            v = v.lower()
+            if v and ("@" not in v or " " in v):
+                raise ValueError("Indirizzo email non valido")
+        return v
+
+
 class GuestUpdate(BaseModel):
     fullName: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, max_length=100)

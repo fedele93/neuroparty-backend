@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import can_modify, get_client_id, is_admin
+from ..auth import can_modify, get_client_id, is_admin, require_admin
 from ..deps import get_db
 from ..models import Guest, now_ms
 from ..schemas import GuestIn, GuestUpdate
@@ -12,9 +12,10 @@ router = APIRouter(prefix="/api/guests", tags=["invitati"])
 
 
 @router.get("")
-def list_guests(db: Session = Depends(get_db)):
+def list_guests(db: Session = Depends(get_db), admin: bool = Depends(is_admin)):
+    """Lista invitati; con X-Admin-Token anche email, telefono e consenso."""
     rows = db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()
-    return [g.to_dict() for g in rows]
+    return [g.to_dict(private=admin) for g in rows]
 
 
 # Note alimentari che significano "nessuna esigenza" (non vanno nel riepilogo per il catering)
@@ -31,6 +32,13 @@ def guests_summary(guests: list[Guest]) -> dict:
         cat = by_category.setdefault(g.category or "Invitato", {"category": g.category or "Invitato", "guests": 0, "covers": 0})
         cat["guests"] += 1
         cat["covers"] += g.guests_count
+    # menu scelti dal profilo (invitato + accompagnatori); chi non ha scelto conta come "da scegliere"
+    by_menu: dict[str, int] = {}
+    for g in confirmed:
+        people = [g.menu or ""] + [c.get("menu", "") or "" for c in g.companions]
+        people += [""] * max(0, g.guests_count - len(people))  # coperti senza nome né menu
+        for m in people[: max(g.guests_count, 1)]:
+            by_menu[m] = by_menu.get(m, 0) + 1
     dietary: dict[str, dict] = {}
     for g in confirmed:
         note = (g.dietary_notes or "").strip()
@@ -47,6 +55,7 @@ def guests_summary(guests: list[Guest]) -> dict:
         "declinedGuests": len(declined),
         "byCategory": sorted(by_category.values(), key=lambda c: (-c["covers"], c["category"])),
         "dietary": sorted(dietary.values(), key=lambda d: (-d["covers"], d["note"])),
+        "byMenu": [{"menu": m or "", "covers": n} for m, n in sorted(by_menu.items(), key=lambda kv: (-kv[1], kv[0]))],
     }
 
 
@@ -144,3 +153,33 @@ def delete_guest(
     db.commit()
     _emit(request, "guest.deleted", snapshot, db)
     return None
+
+
+# ---------------------------------------------------------------- profilo: link personale (organizzatori)
+
+
+@router.get("/{guest_id}/link", dependencies=[Depends(require_admin)])
+def guest_link(guest_id: int, request: Request, db: Session = Depends(get_db)):
+    """Il link personale dell'invitato (lo crea se manca), da copiare o stampare come QR."""
+    from .profile import ensure_token, profile_link
+
+    guest = db.get(Guest, guest_id)
+    if guest is None:
+        raise HTTPException(404, "Invitato non trovato")
+    token = ensure_token(guest)
+    db.commit()
+    return {"guestId": guest.id, "link": profile_link(request, token), "email": guest.email, "guest": guest.to_dict(private=True)}
+
+
+@router.post("/{guest_id}/invite", status_code=202, dependencies=[Depends(require_admin)])
+def guest_invite(guest_id: int, request: Request, db: Session = Depends(get_db)):
+    """Manda all'invitato l'email con il link personale (serve l'email nel suo profilo)."""
+    from .profile import ensure_token, profile_link, send_access_link
+
+    guest = db.get(Guest, guest_id)
+    if guest is None:
+        raise HTTPException(404, "Invitato non trovato")
+    if not guest.email:
+        raise HTTPException(422, "L'invitato non ha un'email: copia il link e mandaglielo tu")
+    mail = send_access_link(request, db, guest)
+    return {"guestId": guest.id, "link": profile_link(request, ensure_token(guest)), "mail": mail}

@@ -53,6 +53,7 @@ EVENTS: dict[str, str] = {
     "photo.uploaded": "Nuova foto in galleria (data.photo, con imageUri assoluto)",
     "gift.pooled": "Nuova quota unica registrata per il cassiere (data.contribution con la ripartizione, data.summary)",
     "gift.pool_deleted": "Quota unica cancellata da chi l'aveva registrata o dal cassiere (data.contributionId)",
+    "mail.send": "Email pronta da spedire tramite il nodo Send Email di n8n (data.to, data.subject, data.text, data.html, data.kind)",
     "notification.scheduled": "Notifica programmata dagli organizzatori (data.notification)",
     "notification.published": "Notifica pubblicata e inviata in push (data.notification, data.scheduled)",
     "test": "Evento di prova inviato da POST /api/automation/webhook-test",
