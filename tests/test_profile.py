@@ -1,7 +1,5 @@
 """Profilo personale dell'invitato (link via email) ed email tramite n8n (evento mail.send)."""
-import json
 
-import httpx
 
 from conftest import ADMIN, make_client
 from test_automation import N8N_URL, FakeN8n
