@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_automation, require_treasurer_or_automation
 from ..deps import get_db
+from ..mail import MENU_LABELS
 from ..models import POOL_STATUS_RECEIVED, BusBooking, GiftTarget, Guest
 from .gifts import collectors_of, effective_collector_id, pool_rows_for
 
@@ -52,22 +53,28 @@ def export_guests(db: Session = Depends(get_db)):
     rows = db.scalars(select(Guest).order_by(Guest.rsvp_status.asc(), Guest.full_name.asc())).all()
     return _csv_response(
         "invitati.csv",
-        ["Nome", "Categoria", "Stato RSVP", "Persone", "Esigenze alimentari", "Contatto", "Aggiornato il"],
+        ["Nome", "Categoria", "Stato RSVP", "Persone", "Menu", "Accompagnatori e menu", "Esigenze alimentari", "Email", "Telefono", "Contatto", "Aggiornato il"],
         [[g.full_name, g.category, RSVP_LABELS.get(g.rsvp_status, g.rsvp_status), g.guests_count,
-          g.dietary_notes, g.contact_info, _fmt_ts(g.updated_at)] for g in rows],
+          MENU_LABELS.get(g.menu, g.menu) if g.menu else "",
+          "; ".join(f"{c.get('name', '')}: {MENU_LABELS.get(c.get('menu', ''), c.get('menu', '')) if c.get('menu') else 'da scegliere'}"
+                    + (f" ({c['notes']})" if c.get("notes") else "") for c in g.companions),
+          g.dietary_notes, g.email, g.phone, g.contact_info, _fmt_ts(g.updated_at)] for g in rows],
     )
 
 
 @router.get("/bus.csv", dependencies=[Depends(require_automation)])
 def export_bus(db: Session = Depends(get_db)):
-    rows = db.scalars(select(BusBooking).order_by(BusBooking.pickup_stop.asc(), BusBooking.passenger_name.asc())).all()
-    total = sum(b.seats_count for b in rows)
-    data = [[b.passenger_name, b.seats_count, b.pickup_stop, "Sì" if b.return_trip_wanted else "No",
-             b.contact_phone, b.notes, _fmt_ts(b.booked_at)] for b in rows]
-    data.append(["TOTALE POSTI", total, "", "", "", "", ""])
+    rows = db.scalars(select(BusBooking).order_by(BusBooking.status.asc(), BusBooking.pickup_stop.asc(), BusBooking.passenger_name.asc())).all()
+    guests = {g.id: g for g in db.scalars(select(Guest)).all()}
+    confirmed = [b for b in rows if b.status != "WAITLIST"]
+    data = [[b.passenger_name, b.seats_count, "Lista d'attesa" if b.status == "WAITLIST" else "Confermata", b.code, b.pickup_stop,
+             "Sì" if b.return_trip_wanted else "No", b.contact_phone or (guests[b.guest_id].phone if b.guest_id in guests else ""),
+             guests[b.guest_id].email if b.guest_id in guests else "", "Sì" if b.checked_in_at else "", b.notes, _fmt_ts(b.booked_at)] for b in rows]
+    data.append(["TOTALE POSTI CONFERMATI", sum(b.seats_count for b in confirmed), "", "", "", "", "", "", "", "", ""])
+    data.append(["IN LISTA D'ATTESA", sum(b.seats_count for b in rows if b.status == "WAITLIST"), "", "", "", "", "", "", "", "", ""])
     return _csv_response(
         "navetta.csv",
-        ["Passeggero", "Posti", "Fermata", "Ritorno", "Telefono", "Note", "Prenotato il"],
+        ["Passeggero", "Posti", "Stato", "Codice", "Fermata", "Ritorno", "Telefono", "Email", "Salito", "Note", "Prenotato il"],
         data,
     )
 

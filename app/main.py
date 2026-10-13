@@ -110,6 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant, profile, mail):
         app.include_router(r.router)
     app.include_router(assistant.admin)
+    app.include_router(mail.reminders)
 
     # Foto caricate dagli invitati
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")

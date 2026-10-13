@@ -81,9 +81,14 @@ def test_guest_validation(client):
 
 def test_bus_capacity(client):
     s = client.get("/api/bus/summary").json()
-    assert s == {"maxSeats": 54, "bookedSeats": 10, "availableSeats": 44}
+    assert s == {**s, "maxSeats": 54, "bookedSeats": 10, "availableSeats": 44, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
     r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 45})
     assert r.status_code == 409
+    # con allowWaitlist si finisce in lista d'attesa invece dell'errore; i posti confermati non cambiano
+    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 45, "allowWaitlist": True}, headers={"X-Client-Id": "w"})
+    assert w.status_code == 201 and w.json()["status"] == "WAITLIST" and w.json()["code"].startswith("NP-")
+    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 45 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
+    assert client.delete(f"/api/bus/bookings/{w.json()['id']}", headers={"X-Client-Id": "w"}).status_code == 204
     r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 44}, headers={"X-Client-Id": "c1"})
     assert r.status_code == 201
     assert client.get("/api/bus/summary").json()["availableSeats"] == 0
@@ -515,14 +520,14 @@ def test_csv_export_requires_admin(client):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     assert 'filename="invitati.csv"' in r.headers["content-disposition"]
     lines = r.text.lstrip("\ufeff").splitlines()
-    assert lines[0] == "Nome;Categoria;Stato RSVP;Persone;Esigenze alimentari;Contatto;Aggiornato il"
+    assert lines[0] == "Nome;Categoria;Stato RSVP;Persone;Menu;Accompagnatori e menu;Esigenze alimentari;Email;Telefono;Contatto;Aggiornato il"
     assert len(lines) == 8  # intestazione + 7 invitati demo
-    assert any(line.startswith("Dott. Luca Gatti;Colleghi Reparto;In attesa;2;") for line in lines)
+    assert any(line.startswith("Dott. Luca Gatti;Colleghi Reparto;In attesa;2;;;") for line in lines)
 
     r = client.get("/api/export/bus.csv", headers=ADMIN)
     lines = r.text.lstrip("\ufeff").splitlines()
-    assert lines[0].startswith("Passeggero;Posti;Fermata;Ritorno")
-    assert lines[-1].startswith("TOTALE POSTI;10;")
+    assert lines[0].startswith("Passeggero;Posti;Stato;Codice;Fermata;Ritorno;Telefono;Email;Salito")
+    assert lines[-2].startswith("TOTALE POSTI CONFERMATI;10;") and lines[-1].startswith("IN LISTA D'ATTESA;0;")
 
 
 def test_scheduled_notification_lifecycle(client):

@@ -33,6 +33,10 @@ def make_session_factory(engine):
 ADDED_COLUMNS = {
     "event_notifications": {"scheduled_at": "INTEGER"},
     "gift_pool_contributions": {"collector_id": "VARCHAR(64) NOT NULL DEFAULT ''", "collector_name": "VARCHAR(200) NOT NULL DEFAULT ''"},
+    "bus_bookings": {
+        "guest_id": "INTEGER", "status": "VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED'", "code": "VARCHAR(16) NOT NULL DEFAULT ''",
+        "checked_in_at": "INTEGER",
+    },
     "guests": {
         "email": "VARCHAR(200) NOT NULL DEFAULT ''", "phone": "VARCHAR(100) NOT NULL DEFAULT ''",
         "menu": "VARCHAR(30) NOT NULL DEFAULT ''", "companions_json": "TEXT NOT NULL DEFAULT '[]'",

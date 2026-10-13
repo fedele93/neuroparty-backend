@@ -1,5 +1,5 @@
 {
-  "meta": { "maxBusSeats": 54 },
+  "meta": { "maxBusSeats": 54, "menuDeadline": "2026-11-06", "busDeadline": "2026-11-11" },
   "schedule": {
     "ceremonyDate": "2026-11-09",
     "ceremonyTime": "",

@@ -39,6 +39,19 @@ def guests_summary(guests: list[Guest]) -> dict:
         people += [""] * max(0, g.guests_count - len(people))  # coperti senza nome né menu
         for m in people[: max(g.guests_count, 1)]:
             by_menu[m] = by_menu.get(m, 0) + 1
+    # allergie e note per persona (invitato e accompagnatori) e chi non ha ancora scelto il menu
+    allergies = []
+    missing_menu = []
+    for g in confirmed:
+        if (g.dietary_notes or "").strip().lower() not in _NO_DIET:
+            allergies.append({"name": g.full_name, "notes": g.dietary_notes.strip(), "guest": g.full_name})
+        if not g.menu:
+            missing_menu.append(g.full_name)
+        for c in g.companions:
+            if (c.get("notes") or "").strip():
+                allergies.append({"name": c.get("name") or "accompagnatore", "notes": c["notes"].strip(), "guest": g.full_name})
+            if not c.get("menu"):
+                missing_menu.append(f"{c.get('name') or 'accompagnatore'} (con {g.full_name})")
     dietary: dict[str, dict] = {}
     for g in confirmed:
         note = (g.dietary_notes or "").strip()
@@ -56,6 +69,8 @@ def guests_summary(guests: list[Guest]) -> dict:
         "byCategory": sorted(by_category.values(), key=lambda c: (-c["covers"], c["category"])),
         "dietary": sorted(dietary.values(), key=lambda d: (-d["covers"], d["note"])),
         "byMenu": [{"menu": m or "", "covers": n} for m, n in sorted(by_menu.items(), key=lambda kv: (-kv[1], kv[0]))],
+        "allergies": allergies,
+        "missingMenu": missing_menu,
     }
 
 

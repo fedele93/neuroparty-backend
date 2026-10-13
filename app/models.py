@@ -115,6 +115,11 @@ class BusBooking(Base):
     contact_phone: Mapped[str] = mapped_column(String(100), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     booked_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    # ---- fase 3: prenotazione dal profilo, lista d'attesa, codice e check-in
+    guest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="CONFIRMED")  # CONFIRMED | WAITLIST
+    code: Mapped[str] = mapped_column(String(16), default="")
+    checked_in_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     owner_client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def to_dict(self) -> dict:
@@ -127,6 +132,10 @@ class BusBooking(Base):
             "contactPhone": self.contact_phone,
             "notes": self.notes,
             "bookedAt": self.booked_at,
+            "guestId": self.guest_id,
+            "status": self.status or "CONFIRMED",
+            "code": self.code,
+            "checkedInAt": self.checked_in_at,
             "ownerClientId": self.owner_client_id,
         }
 

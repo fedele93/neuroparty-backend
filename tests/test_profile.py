@@ -146,3 +146,119 @@ def test_schema_migration_adds_profile_columns(tmp_path):
         g = c.get("/api/guests").json()[0]
         assert g["fullName"] == "Vecchio" and g["companions"] == [] and g["menu"] == "" and g["hasProfile"] is False
         assert c.get("/api/guests/summary").json()["byMenu"] == [{"menu": "", "covers": 2}]
+
+
+def _token_for(c, name):
+    g = next(x for x in c.get("/api/guests").json() if x["fullName"] == name)
+    return c.get(f"/api/guests/{g['id']}/link", headers=ADMIN).json()["link"].split("#profilo=")[1], g["id"]
+
+
+def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
+    n8n = FakeN8n()
+    with make_client(tmp_path, webhook_url=N8N_URL, webhook_handler=n8n) as c:
+        c.app.state.mailer.sync = True
+        # due profili con email
+        for name, email in (("Dott. Luca Gatti", "gatti@example.org"), ("Dott.ssa Sofia Valenti", "sofia@example.org")):
+            token, _ = _token_for(c, name)
+            c.put("/api/profile", json={"fullName": name, "rsvpStatus": "CONFIRMED", "email": email, "consent": True,
+                                        "companions": [{"name": "Ospite", "menu": "STANDARD"}] if "Gatti" in name else []},
+                  headers={"X-Guest-Token": token})
+        gatti_token, gatti_id = _token_for(c, "Dott. Luca Gatti")
+        sofia_token, _ = _token_for(c, "Dott.ssa Sofia Valenti")
+        G, S = {"X-Guest-Token": gatti_token}, {"X-Guest-Token": sofia_token}
+
+        prof = c.get("/api/profile", headers=G).json()
+        assert prof["busBooking"] is None and prof["bus"]["availableSeats"] == 44 and prof["deadlines"]["busDeadline"] == "2026-11-11"
+
+        # prenotazione dal profilo: posti = persone (2), email di conferma con il file calendario
+        r = c.put("/api/profile/bus", json={"pickupStop": "Stazione Ferroviaria Centrale di Bari", "returnTripWanted": True}, headers=G)
+        assert r.status_code == 200, r.text
+        b = r.json()["busBooking"]
+        assert b["seatsCount"] == 2 and b["status"] == "CONFIRMED" and b["guestId"] == gatti_id and b["code"].startswith("NP-")
+        assert b["passengerName"] == "Dott. Luca Gatti" and r.json()["bus"]["bookedSeats"] == 12
+        mail = _mail_events(n8n)[-1]
+        assert mail["kind"] == "bus_confirmation" and mail["to"] == "gatti@example.org" and b["code"] in mail["subject"]
+        assert "Stazione Ferroviaria Centrale di Bari" in mail["text"] and mail["attachments"][0]["filename"] == "navetta.ics"
+        import base64
+        ics = base64.b64decode(mail["attachments"][0]["contentBase64"]).decode()
+        assert "BEGIN:VEVENT" in ics and "DTSTART;VALUE=DATE:20261113" in ics and b["code"] in ics  # orario navetta da definire: tutto il giorno
+        # una sola prenotazione per profilo: la seconda chiamata la aggiorna
+        r = c.put("/api/profile/bus", json={"seatsCount": 3, "pickupStop": "Policlinico di Bari (Piazzale Principale)"}, headers=G)
+        assert r.json()["busBooking"]["seatsCount"] == 3 and r.json()["busBooking"]["id"] == b["id"]
+        assert len([x for x in c.get("/api/bus/bookings").json() if x["guestId"] == gatti_id]) == 1
+
+        # Sofia chiede 42 posti: ne restano 41 -> lista d'attesa + email dedicata
+        r = c.put("/api/profile/bus", json={"seatsCount": 42}, headers=S)
+        assert r.status_code == 200 and r.json()["busBooking"]["status"] == "WAITLIST"
+        assert _mail_events(n8n)[-1]["kind"] == "bus_waitlist" and "lista d'attesa" in _mail_events(n8n)[-1]["subject"]
+        assert c.get("/api/bus/summary").json()["waitlistSeats"] == 42
+        # Gatti annulla: Sofia viene promossa e riceve "posto confermato" con il calendario
+        r = c.delete("/api/profile/bus", headers=G)
+        assert r.status_code == 200 and r.json()["busBooking"] is None
+        kinds = [m["kind"] for m in _mail_events(n8n)]
+        assert kinds[-2:] == ["bus_promoted", "bus_cancelled"] or kinds[-2:] == ["bus_cancelled", "bus_promoted"]
+        promoted = next(m for m in _mail_events(n8n) if m["kind"] == "bus_promoted")
+        assert promoted["to"] == "sofia@example.org" and promoted["attachments"]
+        assert "bus.promoted" in n8n.events
+        assert c.get("/api/profile", headers=S).json()["busBooking"]["status"] == "CONFIRMED"
+        assert c.get("/api/bus/summary").json() == {**c.get("/api/bus/summary").json(), "bookedSeats": 52, "waitlistSeats": 0}
+        assert c.delete("/api/profile/bus", headers=G).status_code == 404
+
+        # check-in degli organizzatori e CSV
+        sofia_b = c.get("/api/profile", headers=S).json()["busBooking"]
+        assert c.post(f"/api/bus/bookings/{sofia_b['id']}/checkin", json={"checkedIn": True}).status_code == 403
+        assert c.post(f"/api/bus/bookings/{sofia_b['id']}/checkin", json={"checkedIn": True}, headers=ADMIN).json()["checkedInAt"]
+        assert c.get("/api/bus/summary").json()["checkedInSeats"] == 42
+        lines = c.get("/api/export/bus.csv", headers=ADMIN).text.lstrip("\ufeff").splitlines()
+        row = next(ln for ln in lines if ln.startswith("Dott.ssa Sofia Valenti;"))
+        assert row.split(";")[2:4] == ["Confermata", sofia_b["code"]] and row.split(";")[7:9] == ["sofia@example.org", "Sì"]
+
+        # promemoria navetta (token automazioni/organizzatore) e promemoria menu
+        r = c.post("/api/mail/reminders/bus", headers=ADMIN)
+        assert r.status_code == 200 and r.json()["sent"] == 1 and _mail_events(n8n)[-1]["kind"] == "bus_reminder"
+        assert "Domani la navetta" in _mail_events(n8n)[-1]["subject"]
+        r = c.post("/api/mail/reminders/menu", headers=ADMIN)
+        # Gatti e Sofia non hanno scelto il menu (Gatti: suo; Sofia: suo) -> 2 promemoria
+        assert r.json()["sent"] == 2 and _mail_events(n8n)[-1]["kind"] == "menu_reminder" and "fino al venerdì 6 novembre 2026" in _mail_events(n8n)[-1]["text"]
+        assert c.post("/api/mail/reminders/menu").status_code == 403
+        # chi non partecipa non può prenotare
+        c.put("/api/profile", json={"fullName": "Dott.ssa Sofia Valenti", "rsvpStatus": "DECLINED", "email": "sofia@example.org", "consent": True}, headers=S)
+        assert c.put("/api/profile/bus", json={}, headers=S).status_code == 409
+
+
+def test_catering_summary_allergies_missing_menu_and_guest_csv(client):
+    token, _ = _token_for(client, "Dott. Luca Gatti")
+    client.put("/api/profile", json={"fullName": "Dott. Luca Gatti", "rsvpStatus": "CONFIRMED", "menu": "VEGANO", "dietaryNotes": "allergia ai crostacei",
+                                     "companions": [{"name": "Marta", "menu": "", "notes": "intollerante al lattosio"}], "consent": True, "phone": "333 1"},
+               headers={"X-Guest-Token": token})
+    s = client.get("/api/guests/summary").json()
+    assert {a["name"]: a["notes"] for a in s["allergies"]} == {**{a["name"]: a["notes"] for a in s["allergies"]}, "Dott. Luca Gatti": "allergia ai crostacei", "Marta": "intollerante al lattosio"}
+    assert "Marta (con Dott. Luca Gatti)" in s["missingMenu"]
+    lines = client.get("/api/export/guests.csv", headers=ADMIN).text.lstrip("\ufeff").splitlines()
+    row = next(ln for ln in lines if ln.startswith("Dott. Luca Gatti;"))
+    assert row.split(";")[4:6] == ["vegano", "Marta: da scegliere (intollerante al lattosio)"] and row.split(";")[8] == "333 1"
+
+
+def test_menu_and_bus_deadlines_lock_profile_changes(tmp_path):
+    import json as _json
+
+    from conftest import SEED
+
+    with open(SEED, encoding="utf-8") as f:
+        data = _json.load(f)
+    data["meta"]["menuDeadline"] = "2020-01-01"
+    data["meta"]["busDeadline"] = "2020-01-01"
+    seed = tmp_path / "past.json"
+    seed.write_text(_json.dumps(data), encoding="utf-8")
+    with make_client(tmp_path, seed_file=str(seed)) as c:
+        c.app.state.mailer.sync = True
+        token, _ = _token_for(c, "Dott. Luca Gatti")
+        H = {"X-Guest-Token": token}
+        prof = c.get("/api/profile", headers=H).json()
+        assert prof["deadlines"]["menuLocked"] is True and prof["deadlines"]["busLocked"] is True
+        assert c.get("/api/bus/summary").json()["busLocked"] is True
+        base = {"fullName": "Dott. Luca Gatti", "rsvpStatus": prof["guest"]["rsvpStatus"], "consent": True, "menu": prof["guest"]["menu"], "dietaryNotes": prof["guest"]["dietaryNotes"]}
+        assert c.put("/api/profile", json={**base, "phone": "333"}, headers=H).status_code == 200  # contatti ancora modificabili
+        assert c.put("/api/profile", json={**base, "menu": "VEGANO"}, headers=H).status_code == 409
+        assert c.put("/api/profile/bus", json={}, headers=H).status_code == 409
+        assert c.post("/api/mail/reminders/menu", headers=ADMIN).json()["sent"] == 0

@@ -28,6 +28,12 @@ RSVP_LABELS = {"CONFIRMED": "Confermata", "PENDING": "In attesa di conferma", "D
 KINDS = {
     "access_link": "Link personale",
     "rsvp_confirmation": "Conferma partecipazione",
+    "menu_reminder": "Promemoria menu",
+    "bus_confirmation": "Conferma navetta",
+    "bus_waitlist": "Navetta: lista d'attesa",
+    "bus_promoted": "Navetta: posto confermato",
+    "bus_cancelled": "Navetta: prenotazione annullata",
+    "bus_reminder": "Promemoria navetta",
     "test": "Email di prova",
 }
 
@@ -47,11 +53,16 @@ def format_date_it(iso: str) -> str:
 def event_summary(event_data: dict) -> dict:
     sch = get_schedule(event_data)
     program = event_data.get("program") or {}
+    bus = (event_data.get("busSchedule") or {}).get("andata") or {}
     return {
         "title": program.get("title") or "NeuroParty",
         "partyDate": format_date_it(sch.get("partyDate", "")),
+        "partyDateIso": sch.get("partyDate", ""),
         "partyTime": sch.get("partyTime") or "",
         "location": program.get("locationLabel") or "",
+        "busDepartureTime": sch.get("busDepartureTime") or "",
+        "busFrom": bus.get("from") or "",
+        "busTo": bus.get("to") or "",
     }
 
 
@@ -134,6 +145,87 @@ def rsvp_confirmation_mail(guest: Guest, link: str, event_data: dict) -> tuple[s
             body += f"<p><b>Allergie o note:</b> {e(guest.dietary_notes.strip())}</p>"
     body += _button(link, "Modifica il mio profilo")
     return subject, text, _layout("Risposta registrata", body, "Hai ricevuto questa email perché hai aggiornato il tuo profilo nell'app della festa.")
+
+
+def menu_reminder_mail(guest: Guest, link: str, event_data: dict, deadline_text: str) -> tuple[str, str, str]:
+    ev = event_summary(event_data)
+    missing = [guest.full_name] if not guest.menu else []
+    missing += [c.get("name") or "accompagnatore" for c in guest.companions if not c.get("menu")]
+    subject = "Manca il tuo menu per la festa" if len(missing) <= 1 else f"Mancano i menu per {len(missing)} persone"
+    who = ", ".join(missing) or "te"
+    text = (f"Ciao {first_name(guest.full_name)},\n\nper organizzare la cena del {ev['partyDate']} ci serve il menu di: {who}.\n"
+            + (f"Puoi sceglierlo fino al {deadline_text}.\n" if deadline_text else "") + f"\nApri il tuo profilo: {link}\n\nGrazie!")
+    e = html_lib.escape
+    body = (f"<p>Ciao {e(first_name(guest.full_name))},</p><p>per organizzare la cena del <b>{e(ev['partyDate'])}</b> ci serve il menu di: <b>{e(who)}</b>.</p>"
+            + (f"<p>Puoi sceglierlo fino al <b>{e(deadline_text)}</b>.</p>" if deadline_text else "") + _button(link, "Scegli il menu"))
+    return subject, text, _layout("Manca il menu", body, "Promemoria dall'app della festa.")
+
+
+def bus_ics(event_data: dict, booking, public_url: str = "") -> str:
+    """File calendario per la partenza della navetta (orario dal blocco schedule; senza orario, tutto il giorno)."""
+    from .schedule import VTIMEZONE_ROME, _ics_escape, _parse_date, _parse_time, _vevent
+
+    ev = event_summary(event_data)
+    day = _parse_date(ev["partyDateIso"])
+    if day is None:
+        return ""
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//NeuroParty//Backend//IT", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+             "X-WR-CALNAME:" + _ics_escape("Navetta festa di specializzazione")] + VTIMEZONE_ROME
+    where = booking.pickup_stop or ev["busFrom"]
+    desc = f"Prenotazione {booking.code}: {booking.seats_count} posti" + (f", fermata {booking.pickup_stop}" if booking.pickup_stop else "") + \
+           (". Ritorno previsto." if booking.return_trip_wanted else "") + f" Arrivo: {ev['busTo']}."
+    lines += _vevent(f"neuroparty-navetta-{booking.code or booking.id}@neurospec", "Navetta per la festa di specializzazione",
+                     where, desc, day, _parse_time(ev["busDepartureTime"]), 1, public_url)
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+def bus_mail(kind: str, guest: Guest, booking, request) -> tuple[str, str, str, list[dict]]:
+    """Email sulla navetta (conferma, lista d'attesa, posto confermato, annullata, promemoria)
+    con il file calendario allegato quando la prenotazione è confermata."""
+    import base64
+
+    from .deps import base_url_for
+
+    event_data = request.app.state.event_data
+    ev = event_summary(event_data)
+    link = f"{base_url_for(request)}/#profilo={guest.access_token}" if guest.access_token else base_url_for(request)
+    when = ev["partyDate"] + (f" alle {ev['busDepartureTime']}" if ev["busDepartureTime"] else " (orario di partenza da confermare)")
+    stop = booking.pickup_stop or ev["busFrom"] or "fermata da indicare"
+    seats = f"{booking.seats_count} {'posto' if booking.seats_count == 1 else 'posti'}"
+    e = html_lib.escape
+    attachments: list[dict] = []
+    if kind == "bus_waitlist":
+        subject = f"Navetta: sei in lista d'attesa ({seats})"
+        text = (f"Ciao {first_name(guest.full_name)},\n\nla navetta per la festa è al completo: ti abbiamo messo in lista d'attesa per {seats} "
+                f"(codice {booking.code}). Se si liberano posti ti confermiamo subito via email.\n\nPartenza: {when}, da {stop}.\n"
+                f"Modifica o annulla dal tuo profilo: {link}")
+        body = (f"<p>Ciao {e(first_name(guest.full_name))},</p><p>la navetta per la festa è al completo: ti abbiamo messo in <b>lista d'attesa</b> per {seats} "
+                f"(codice <b>{e(booking.code)}</b>). Se si liberano posti ti confermiamo subito via email.</p><p>Partenza: {e(when)}, da {e(stop)}.</p>" + _button(link, "Il mio profilo"))
+        title = "Lista d'attesa navetta"
+    elif kind == "bus_cancelled":
+        subject = f"Navetta: prenotazione {booking.code} annullata"
+        text = f"Ciao {first_name(guest.full_name)},\n\nla tua prenotazione sulla navetta ({seats}, codice {booking.code}) è stata annullata.\nSe cambi idea prenota di nuovo dal profilo: {link}"
+        body = f"<p>Ciao {e(first_name(guest.full_name))},</p><p>la tua prenotazione sulla navetta ({seats}, codice <b>{e(booking.code)}</b>) è stata annullata.</p>" + _button(link, "Prenota di nuovo")
+        title = "Prenotazione annullata"
+    else:
+        intro = {"bus_confirmation": "la tua prenotazione sulla navetta è confermata",
+                 "bus_promoted": "si è liberato un posto: la tua prenotazione sulla navetta è confermata",
+                 "bus_reminder": "ti ricordiamo la navetta per la festa"}.get(kind, "la tua prenotazione sulla navetta è confermata")
+        subject = {"bus_promoted": f"Navetta: posto confermato ({seats})", "bus_reminder": f"Domani la navetta: {seats}, {stop}"}.get(kind, f"Navetta confermata: {seats} (codice {booking.code})")
+        text = (f"Ciao {first_name(guest.full_name)},\n\n{intro}.\nCodice: {booking.code}\nPosti: {booking.seats_count}\nPartenza: {when}\nDa: {stop}\n"
+                f"Arrivo: {ev['busTo']}\nRitorno: {'sì' if booking.return_trip_wanted else 'no'}\n\n"
+                f"Alla partenza basta dire il tuo nome o mostrare il codice. In allegato l'evento per il calendario.\n"
+                f"Modifica o annulla dal tuo profilo: {link}")
+        body = (f"<p>Ciao {e(first_name(guest.full_name))},</p><p>{e(intro)}.</p>"
+                f"<p><b>Codice:</b> {e(booking.code)}<br><b>Posti:</b> {booking.seats_count}<br><b>Partenza:</b> {e(when)}<br><b>Da:</b> {e(stop)}<br>"
+                f"<b>Arrivo:</b> {e(ev['busTo'])}<br><b>Ritorno:</b> {'sì' if booking.return_trip_wanted else 'no'}</p>"
+                f"<p>Alla partenza basta dire il tuo nome o mostrare il codice. In allegato l'evento per il calendario.</p>" + _button(link, "Il mio profilo"))
+        title = {"bus_promoted": "Posto confermato", "bus_reminder": "Promemoria navetta"}.get(kind, "Navetta confermata")
+        ics = bus_ics(event_data, booking, base_url_for(request))
+        if ics:
+            attachments.append({"filename": "navetta.ics", "contentType": "text/calendar", "contentBase64": base64.b64encode(ics.encode("utf-8")).decode("ascii")})
+    return subject, text, _layout(title, body, "Email automatica dall'app della festa: per cambiare qualcosa usa il tuo profilo."), attachments
 
 
 def test_mail(event_data: dict) -> tuple[str, str, str]:

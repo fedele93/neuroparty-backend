@@ -4,12 +4,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin
-from ..deps import get_db
-from ..mail import KINDS, test_mail
-from ..models import MailOutbox
+from ..auth import require_admin, require_automation
+from ..deadlines import deadline, deadline_passed
+from ..deps import base_url_for, get_db
+from ..mail import KINDS, bus_mail, format_date_it, menu_reminder_mail, test_mail
+from ..models import BusBooking, Guest, MailOutbox
 
 router = APIRouter(prefix="/api/mail", tags=["email"], dependencies=[Depends(require_admin)])
+# Promemoria: anche con il token automazioni, così n8n può lanciarli a orario (es. il giorno prima)
+reminders = APIRouter(prefix="/api/mail/reminders", tags=["email"], dependencies=[Depends(require_automation)])
 
 
 class TestMailIn(BaseModel):
@@ -42,3 +45,43 @@ def resend(mail_id: int, request: Request):
 def send_test(body: TestMailIn, request: Request):
     subject, text, html = test_mail(request.app.state.event_data)
     return request.app.state.mailer.send("test", body.to.strip(), subject, text, html)
+
+
+def _link(request: Request, guest: Guest) -> str:
+    from .profile import ensure_token
+
+    return f"{base_url_for(request)}/#profilo={ensure_token(guest)}"
+
+
+@reminders.post("/menu")
+def remind_menu(request: Request, db: Session = Depends(get_db)):
+    """Email a chi ha confermato, ha un'email e non ha ancora scelto il menu (suo o di un accompagnatore).
+    Niente invii dopo la data limite del menu."""
+    event_data = request.app.state.event_data
+    if deadline_passed(event_data, "menuDeadline"):
+        return {"sent": 0, "skipped": "termine del menu passato"}
+    deadline_text = format_date_it(deadline(event_data, "menuDeadline")) if deadline(event_data, "menuDeadline") else ""
+    sent = []
+    for g in db.scalars(select(Guest).where(Guest.rsvp_status == "CONFIRMED")).all():
+        if not g.email:
+            continue
+        if g.menu and all(c.get("menu") for c in g.companions):
+            continue
+        link = _link(request, g)
+        db.commit()
+        subject, text, html = menu_reminder_mail(g, link, event_data, deadline_text)
+        sent.append(request.app.state.mailer.send("menu_reminder", g.email, subject, text, html, guest_id=g.id))
+    return {"sent": len(sent), "mails": sent}
+
+
+@reminders.post("/bus")
+def remind_bus(request: Request, db: Session = Depends(get_db)):
+    """Promemoria a tutte le prenotazioni confermate collegate a un profilo con email (da lanciare il giorno prima)."""
+    sent = []
+    for b in db.scalars(select(BusBooking).where(BusBooking.status != "WAITLIST", BusBooking.guest_id.is_not(None))).all():
+        g = db.get(Guest, b.guest_id)
+        if not g or not g.email:
+            continue
+        subject, text, html, attachments = bus_mail("bus_reminder", g, b, request)
+        sent.append(request.app.state.mailer.send("bus_reminder", g.email, subject, text, html, guest_id=g.id, attachments=attachments))
+    return {"sent": len(sent), "mails": sent}

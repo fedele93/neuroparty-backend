@@ -75,6 +75,15 @@ class ProfileIn(BaseModel):
         return v
 
 
+class ProfileBusIn(BaseModel):
+    """Navetta dal profilo: posti (default = persone del profilo), fermata, ritorno, telefono."""
+    seatsCount: int | None = Field(default=None, ge=1, le=54)
+    pickupStop: str = Field(default="", max_length=200)
+    returnTripWanted: bool = True
+    contactPhone: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=500)
+
+
 class GuestUpdate(BaseModel):
     fullName: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, max_length=100)
@@ -91,6 +100,7 @@ class BookingIn(BaseModel):
     returnTripWanted: bool = True
     contactPhone: str = Field(default="", max_length=100)
     notes: str = Field(default="", max_length=500)
+    allowWaitlist: bool = False  # a posti esauriti: in lista d'attesa invece di errore
 
     @field_validator("passengerName", "pickupStop", "contactPhone", "notes")
     @classmethod

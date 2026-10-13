@@ -17,11 +17,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..deadlines import deadline_passed, deadlines_info
 from ..deps import base_url_for, get_db
-from ..mail import access_link_mail, rsvp_confirmation_mail
-from ..models import Guest, now_ms
+from ..mail import access_link_mail, bus_mail, rsvp_confirmation_mail
+from ..models import BusBooking, Guest, now_ms
+from ..routers import bus as bus_router
 from ..routers.guests import guests_summary
-from ..schemas import ProfileIn, ProfileLinkRequest
+from ..schemas import BookingIn, ProfileBusIn, ProfileIn, ProfileLinkRequest
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/profile", tags=["profilo"])
@@ -73,8 +75,19 @@ def current_guest(
     return guest
 
 
-def _profile_payload(guest: Guest, db: Session) -> dict:
-    return {"guest": guest.to_dict(private=True), "summary": {"covers": guests_summary(db.scalars(select(Guest)).all())["covers"]}}
+def own_booking(db: Session, guest: Guest) -> BusBooking | None:
+    return db.scalars(select(BusBooking).where(BusBooking.guest_id == guest.id).order_by(BusBooking.id.asc())).first()
+
+
+def _profile_payload(guest: Guest, db: Session, request: Request) -> dict:
+    booking = own_booking(db, guest)
+    return {
+        "guest": guest.to_dict(private=True),
+        "busBooking": booking.to_dict() if booking else None,
+        "bus": bus_router.bus_summary(request, db),
+        "deadlines": deadlines_info(request.app.state.event_data),
+        "summary": {"covers": guests_summary(db.scalars(select(Guest)).all())["covers"]},
+    }
 
 
 # ---------------------------------------------------------------------- endpoint
@@ -103,10 +116,10 @@ def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depen
 
 
 @router.get("")
-def my_profile(guest: Guest = Depends(current_guest), db: Session = Depends(get_db)):
+def my_profile(request: Request, guest: Guest = Depends(current_guest), db: Session = Depends(get_db)):
     guest.last_login_at = now_ms()
     db.commit()
-    return _profile_payload(guest, db)
+    return _profile_payload(guest, db, request)
 
 
 @router.put("")
@@ -117,6 +130,12 @@ def update_profile(body: ProfileIn, request: Request, guest: Guest = Depends(cur
     for c in companions:
         c["name"] = c["name"].strip()
         c["notes"] = c["notes"].strip()
+    # dopo la data limite del menu, menu/accompagnatori/allergie e partecipazione sono bloccati (gli organizzatori possono ancora)
+    if deadline_passed(request.app.state.event_data, "menuDeadline"):
+        food_changed = (body.menu != guest.menu or body.dietaryNotes != guest.dietary_notes or body.rsvpStatus != guest.rsvp_status
+                        or json.dumps(companions, ensure_ascii=False) != json.dumps(guest.companions, ensure_ascii=False))
+        if food_changed:
+            raise HTTPException(409, "Il termine per modificare partecipazione, menu e accompagnatori è passato: per cambiamenti contatta gli organizzatori")
     changes = {}
     for attr, value in (
         ("full_name", body.fullName), ("category", body.category or "Invitato"), ("rsvp_status", body.rsvpStatus),
@@ -142,7 +161,75 @@ def update_profile(body: ProfileIn, request: Request, guest: Guest = Depends(cur
     if guest.email:
         subject, text, html = rsvp_confirmation_mail(guest, profile_link(request, ensure_token(guest)), request.app.state.event_data)
         mail = request.app.state.mailer.send("rsvp_confirmation", guest.email, subject, text, html, guest_id=guest.id)
-    return {**_profile_payload(guest, db), "mail": mail}
+    return {**_profile_payload(guest, db, request), "mail": mail}
+
+
+# ---------------------------------------------------------------------- navetta dal profilo
+
+
+def _send_bus_mail(request: Request, guest: Guest, booking: BusBooking, kind: str) -> dict | None:
+    if not guest.email:
+        return None
+    subject, text, html, attachments = bus_mail(kind, guest, booking, request)
+    return request.app.state.mailer.send(kind, guest.email, subject, text, html, guest_id=guest.id, attachments=attachments)
+
+
+@router.put("/bus")
+def set_bus(body: ProfileBusIn, request: Request, guest: Guest = Depends(current_guest), db: Session = Depends(get_db)):
+    """Prenota o aggiorna la navetta dal profilo: una sola prenotazione per invitato, posti =
+    persone del profilo se non indicati, lista d'attesa a posti esauriti, email di conferma con calendario."""
+    if deadline_passed(request.app.state.event_data, "busDeadline"):
+        raise HTTPException(409, "Il termine per prenotare o modificare la navetta è passato: contatta gli organizzatori")
+    if guest.rsvp_status == "DECLINED":
+        raise HTTPException(409, "Hai indicato che non parteciperai: conferma prima la partecipazione")
+    seats = body.seatsCount or max(1, guest.guests_count)
+    existing = own_booking(db, guest)
+    if existing is not None:
+        # modifica: libera i posti attuali e verifica la capienza sui nuovi
+        total = bus_router.max_seats(request)
+        others = bus_router.booked_seats(db) - (existing.seats_count if existing.status == bus_router.CONFIRMED else 0)
+        existing.seats_count = seats
+        existing.pickup_stop = body.pickupStop.strip()
+        existing.return_trip_wanted = body.returnTripWanted
+        existing.contact_phone = body.contactPhone.strip() or guest.phone
+        existing.notes = body.notes.strip()
+        existing.passenger_name = guest.full_name
+        existing.status = bus_router.CONFIRMED if others + seats <= total else bus_router.WAITLIST
+        bump_version(db)
+        db.commit()
+        db.refresh(existing)
+        bus_router.notify_promoted(request, db, bus_router.promote_waitlist(request, db))
+        db.refresh(existing)
+        booking = existing
+    else:
+        req = BookingIn(passengerName=guest.full_name, seatsCount=seats, pickupStop=body.pickupStop, returnTripWanted=body.returnTripWanted,
+                        contactPhone=body.contactPhone or guest.phone, notes=body.notes, allowWaitlist=True)
+        booking = bus_router.create_booking_record(request, db, req, None, guest=guest)
+    kind = "bus_waitlist" if booking.status == bus_router.WAITLIST else "bus_confirmation"
+    mail = _send_bus_mail(request, guest, booking, kind)
+    return {**_profile_payload(guest, db, request), "mail": mail}
+
+
+@router.delete("/bus")
+def cancel_bus(request: Request, guest: Guest = Depends(current_guest), db: Session = Depends(get_db)):
+    """Annulla la propria prenotazione (i posti liberati vanno alla lista d'attesa)."""
+    existing = own_booking(db, guest)
+    if existing is None:
+        raise HTTPException(404, "Nessuna prenotazione da annullare")
+    if deadline_passed(request.app.state.event_data, "busDeadline"):
+        raise HTTPException(409, "Il termine per modificare la navetta è passato: contatta gli organizzatori")
+    snapshot = existing.to_dict()
+    db.delete(existing)
+    bump_version(db)
+    db.commit()
+    request.app.state.webhooks.emit("bus.cancelled", {"booking": snapshot, "bus": bus_router.bus_summary(request, db)})
+    bus_router.notify_promoted(request, db, bus_router.promote_waitlist(request, db))
+
+    class _Snap:  # per il modello dell'email di annullamento
+        code, seats_count, pickup_stop, return_trip_wanted, id = snapshot["code"], snapshot["seatsCount"], snapshot["pickupStop"], snapshot["returnTripWanted"], snapshot["id"]
+
+    mail = _send_bus_mail(request, guest, _Snap(), "bus_cancelled")
+    return {**_profile_payload(guest, db, request), "mail": mail}
 
 
 @router.post("/logout")

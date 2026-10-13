@@ -49,6 +49,7 @@ EVENTS: dict[str, str] = {
     "guest.deleted": "Invitato rimosso (data.guest, data.summary)",
     "bus.booked": "Nuova prenotazione della navetta (data.booking, data.bus)",
     "bus.cancelled": "Prenotazione navetta cancellata (data.booking, data.bus)",
+    "bus.promoted": "Prenotazione passata dalla lista d'attesa a confermata (data.booking, data.bus)",
     "wish.created": "Nuovo augurio in bacheca (data.wish)",
     "photo.uploaded": "Nuova foto in galleria (data.photo, con imageUri assoluto)",
     "gift.pooled": "Nuova quota unica registrata per il cassiere (data.contribution con la ripartizione, data.summary)",
