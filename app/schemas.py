@@ -27,6 +27,63 @@ class GuestIn(BaseModel):
         return v
 
 
+MenuChoice = Literal["", "STANDARD", "VEGETARIANO", "VEGANO", "SENZA_GLUTINE", "ALTRO"]
+
+
+class CompanionIn(BaseModel):
+    name: str = Field(default="", max_length=200)
+    menu: MenuChoice = ""
+    notes: str = Field(default="", max_length=300)
+
+
+class ProfileLinkRequest(BaseModel):
+    """Richiesta del link personale: con l'email di un invitato già in lista, oppure email + nome per crearsi."""
+    email: str = Field(min_length=3, max_length=200)
+    fullName: str = Field(default="", max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def email_ok(cls, v: str) -> str:
+        v = _clean(v).lower()
+        if "@" not in v or "." not in v.split("@")[-1] or " " in v:
+            raise ValueError("Indirizzo email non valido")
+        return v
+
+
+class ProfileIn(BaseModel):
+    """Il profilo dell'invitato: dati personali, partecipazione, accompagnatori e menu."""
+    fullName: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="Invitato", max_length=100)
+    rsvpStatus: RsvpStatus = "CONFIRMED"
+    email: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=100)
+    menu: MenuChoice = ""
+    dietaryNotes: str = Field(default="", max_length=500)
+    companions: list[CompanionIn] = Field(default_factory=list, max_length=20)
+    consent: bool = False
+
+    @field_validator("fullName", "category", "email", "phone", "dietaryNotes")
+    @classmethod
+    def strip(cls, v: str, info) -> str:
+        v = _clean(v)
+        if info.field_name == "fullName" and not v:
+            raise ValueError("Il nome è obbligatorio")
+        if info.field_name == "email":
+            v = v.lower()
+            if v and ("@" not in v or " " in v):
+                raise ValueError("Indirizzo email non valido")
+        return v
+
+
+class ProfileBusIn(BaseModel):
+    """Navetta dal profilo: posti (default = persone del profilo), fermata, ritorno, telefono."""
+    seatsCount: int | None = Field(default=None, ge=1, le=54)
+    pickupStop: str = Field(default="", max_length=200)
+    returnTripWanted: bool = True
+    contactPhone: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=500)
+
+
 class GuestUpdate(BaseModel):
     fullName: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, max_length=100)
@@ -43,6 +100,7 @@ class BookingIn(BaseModel):
     returnTripWanted: bool = True
     contactPhone: str = Field(default="", max_length=100)
     notes: str = Field(default="", max_length=500)
+    allowWaitlist: bool = False  # a posti esauriti: in lista d'attesa invece di errore
 
     @field_validator("passengerName", "pickupStop", "contactPhone", "notes")
     @classmethod
@@ -87,8 +145,10 @@ class PoolContributionIn(BaseModel):
     """Quota unica versata al cassiere e ripartita fra i neo-specialisti.
     - splitMode EQUAL: totalAmount diviso in parti uguali fra graduateIds (vuoto = tutti);
     - splitMode CUSTOM: allocations con un importo per neo-specialista (il totale è la somma)."""
+    collectorId: str = Field(default="", max_length=64)  # vuoto = primo cassiere
     donorName: str = Field(min_length=1, max_length=200)
     contact: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=200)  # facoltativa: conferma e promemoria al donatore
     paymentMethod: PoolPaymentMethod = "IBAN"
     splitMode: PoolSplitMode = "EQUAL"
     totalAmount: float | None = Field(default=None, gt=0, le=100000)
@@ -96,17 +156,30 @@ class PoolContributionIn(BaseModel):
     allocations: list[PoolAllocationIn] = Field(default_factory=list, max_length=100)
     note: str = Field(default="", max_length=1000)
 
-    @field_validator("donorName", "contact", "note")
+    @field_validator("donorName", "contact", "note", "email")
     @classmethod
     def strip(cls, v: str, info) -> str:
         v = _clean(v)
         if info.field_name == "donorName" and not v:
             raise ValueError("Il nome è obbligatorio: serve al cassiere per riconoscere il versamento")
+        if info.field_name == "email":
+            v = v.lower()
+            if v and ("@" not in v or " " in v):
+                raise ValueError("Indirizzo email non valido")
         return v
 
 
 class PoolStatusIn(BaseModel):
     status: PoolStatus
+
+
+class PoolBatchStatusIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+    status: PoolStatus
+
+
+class PoolNoteIn(BaseModel):
+    treasurerNote: str = Field(default="", max_length=1000)
 
 
 class NotificationIn(BaseModel):

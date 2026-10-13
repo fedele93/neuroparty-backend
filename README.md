@@ -21,7 +21,10 @@ arrivano davvero a tutti.
 | Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like` |
 | Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |
 | Quota unica al cassiere (ripartita fra i neo-specialisti) | `POST /api/gifts/pool`, `GET /api/gifts/pool/mine`, `DELETE /api/gifts/pool/{id}` |
-| Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status` (token cassiere o organizzatori) |
+| Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" (anche in blocco), appunti | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status`, `POST /api/gifts/pool/status`, `PATCH /api/gifts/pool/{id}` (token cassiere o organizzatori) |
+| **Profilo invitato** con link personale via email: RSVP, accompagnatori, menu, navetta | `POST /api/profile/request-link`, `GET/PUT /api/profile`, `PUT/DELETE /api/profile/bus` (header `X-Guest-Token`) |
+| **Email tramite n8n** (evento `mail.send`): esiti, rinvio, prova, promemoria menu/navetta/quote | `GET /api/mail/status`, `GET /api/mail/outbox`, `POST /api/mail/outbox/{id}/resend`, `POST /api/mail/test` (organizzatori); `POST /api/mail/reminders/menu|bus` (automazioni), `POST /api/mail/reminders/pool?days=N` (cassieri o automazioni) |
+| **Area festeggiato**: chi viene, auguri ricevuti, le proprie coordinate, il proprio avatar | `GET /api/graduate/me` (header `X-Graduate-Token`, `GRADUATE_TOKEN_<ID>`); stesso token su `/api/assistant/admin/avatars/<proprio id>` |
 | Notifiche (cronologia + **Web Push** a tutti i dispositivi) | `GET /api/notifications`, `POST /api/notifications` (solo organizzatori) |
 | Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
 | Export CSV per ristorante, autista e cassiere | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori), `GET /api/export/gift-pool.csv` (cassiere o organizzatori) |
@@ -40,7 +43,14 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
 - le automazioni (n8n) usano `X-Automation-Token` (`AUTOMATION_TOKEN`): sola lettura su report,
   riepiloghi ed export CSV;
 - il cassiere delle quote uniche usa `X-Treasurer-Token` (`TREASURER_TOKEN`): vede e gestisce
-  solo le quote uniche (elenco, stato "ricevuta", CSV), senza i poteri dell'organizzatore;
+  solo le quote uniche (elenco, stato "ricevuta", appunti, promemoria ai donatori, CSV), senza i
+  poteri dell'organizzatore;
+- ogni festeggiato usa `X-Graduate-Token` (`GRADUATE_TOKEN_<ID>`, es. `GRADUATE_TOKEN_LUISI`):
+  apre la propria area (chi ha confermato, auguri per lui, coordinate di pagamento come le vedono
+  gli invitati, posti navetta) e configura solo il proprio avatar dell'assistente, senza il
+  token organizzatore;
+- l'invitato con profilo usa `X-Guest-Token` (il link personale ricevuto via email): scrive solo
+  sul proprio record (RSVP, accompagnatori, menu, prenotazione navetta);
 - cambiare lo stato RSVP di un invitato è permesso a tutti.
 
 ## Stack
@@ -98,7 +108,8 @@ nano .env
 | `ADMIN_TOKEN` | stringa segreta lunga (`openssl rand -hex 24`) |
 | `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
-| `TREASURER_TOKEN` | token per il cassiere delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni |
+| `TREASURER_TOKEN` | token dei cassieri delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni; `TREASURER_TOKEN_<ID>` (es. `TREASURER_TOKEN_AKI`) limita la vista a un solo cassiere |
+| `GRADUATE_TOKEN_<ID>` | token personale di un festeggiato (`<ID>` = id in `giftTargets`, es. `GRADUATE_TOKEN_LUISI`), da inserire nella PWA in ⚙️ Impostazioni per l'area 🎓 Festeggiato |
 | `MISTRAL_API_KEY` | chiave API Mistral per l'assistente vocale (vuota = assistente spento); vedi *Assistente vocale* |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
@@ -205,9 +216,16 @@ già inoltrato al container `api`):
 2. **Il backend avvisa n8n** (webhook in uscita): impostando `N8N_WEBHOOK_URL` all'URL di un nodo
    *Webhook* di n8n, ogni evento rilevante viene inviato come POST JSON
    `{"event": "bus.booked", "timestamp": ..., "data": {...}}`. Eventi: `guest.created`,
-   `guest.updated`, `guest.deleted`, `bus.booked`, `bus.cancelled`, `wish.created`,
+   `guest.updated`, `guest.deleted`, `bus.booked`, `bus.cancelled`, `bus.promoted`, `wish.created`,
    `photo.uploaded`, `gift.pooled`, `gift.pool_deleted`, `notification.scheduled`, `notification.published`,
-   `test`. L'invio avviene in un thread separato con tentativi ripetuti: se n8n è spento
+   `mail.send`, `test`. L'evento `mail.send` è speciale: contiene un'email già pronta (`to`,
+   `subject`, `text`, `html`, `attachments`, `kind`) che n8n deve solo spedire con il suo nodo
+   Send Email già configurato; il backend non ha SMTP. Tipi (`kind`): `access_link`
+   (link personale), `rsvp_confirmation`, `menu_reminder`, `bus_confirmation`/`bus_update`/
+   `bus_cancellation`/`bus_promoted`/`bus_reminder` (con `.ics`), `pool_confirmation` e
+   `pool_reminder` (al donatore della quota unica, con IBAN e causale del cassiere),
+   `wish_received` (al festeggiato, se ha un'`email` privata in `giftTargets`), `test`.
+   Ogni email resta in `mail_outbox` con l'esito della consegna a n8n (`GET /api/mail/outbox`). L'invio avviene in un thread separato con tentativi ripetuti: se n8n è spento
    l'app continua a funzionare e nel log compare un avviso. `N8N_WEBHOOK_EVENTS` filtra gli
    eventi (`guest.*,bus.booked`); `N8N_WEBHOOK_SECRET` viene inviato nell'header
    `X-Automation-Secret` (da verificare in n8n con *Header Auth*) e usato per la firma HMAC
@@ -232,9 +250,10 @@ Caddy condiviso), le chiamate possono restare dentro al server senza passare da 
 `GET /api/automation/status` mostra la configurazione attiva (URL mascherato, filtro eventi,
 contatori di invii riusciti/falliti, ultimo esito) e il catalogo degli eventi.
 
-Nella cartella [`n8n/`](n8n/README.md) ci sono due workflow pronti da importare: **report
-giornaliero via mail** (Schedule → HTTP Request → Send Email) e **avvisi in tempo reale**
-(Webhook → Code → Send Email), con le istruzioni per compilarli.
+Nella cartella [`n8n/`](n8n/README.md) ci sono tre workflow pronti da importare: **report
+giornaliero via mail** (Schedule → HTTP Request → Send Email), **avvisi in tempo reale** incluso
+l'invio delle email `mail.send` (Webhook → Code → Send Email) e **CSV settimanale ai cassieri**
+con i promemoria ai donatori in attesa, con le istruzioni per compilarli.
 
 ## Assistente vocale con avatar
 
@@ -303,15 +322,25 @@ timeline, mappa, navetta e il file calendario si aggiornano da soli.
 
 La sezione Regali non mostra mai cifre raccolte o obiettivi: chi vuole donare a un singolo
 neo-specialista trova nella sua card l'IBAN da copiare e i link PayPal e Satispay, senza
-registrare nulla. Chi preferisce fare **un solo versamento** lo fa al **cassiere**
-(`giftCollector` nel JSON: nome, IBAN, PayPal, causale suggerita; metodi ammessi IBAN, PayPal
-e contanti), scegliendo se dividere la quota in parti uguali fra i neo-specialisti o
-personalizzarla. Queste quote vengono registrate sul server con la ripartizione e sono
-visibili solo al cassiere e agli organizzatori: nella PWA, inserendo `TREASURER_TOKEN` in
-⚙️ Impostazioni, la tab Regali mostra il cruscotto (quanto spetta a ciascuno, elenco delle
-quote, stato "ricevuta") e il pulsante per scaricare `quote-uniche.csv`, con una colonna per
-neo-specialista e le righe dei totali, pronto per Excel. Ogni dispositivo può cancellare la
-propria quota finché il cassiere non l'ha segnata come ricevuta.
+registrare nulla. Chi preferisce fare **un solo versamento** lo fa a uno dei **cassieri**
+(`giftCollectors` nel JSON, oggi Dott. Paolo Roberto e Dott. Aki: id, nome, IBAN, PayPal, causale
+suggerita; metodi ammessi IBAN, PayPal e contanti), scegliendo se dividere la quota in parti
+uguali fra i neo-specialisti o personalizzarla. Queste quote vengono registrate sul server con
+il cassiere e la ripartizione e sono visibili solo ai cassieri e agli organizzatori: nella PWA,
+inserendo il token in ⚙️ Impostazioni, la tab Regali mostra il cruscotto (una sezione per
+cassiere con quanto spetta a ciascun neo-specialista, elenco delle quote, stato "ricevuta") e il
+pulsante per scaricare `quote-uniche.csv`, con la colonna del cassiere, una colonna per
+neo-specialista e le righe dei totali per cassiere e complessivi, pronto per Excel.
+`TREASURER_TOKEN` vede tutti i cassieri; `TREASURER_TOKEN_<ID>` (es. `TREASURER_TOKEN_AKI`) solo
+le quote versate a quel cassiere. Ogni dispositivo può cancellare la
+propria quota finché il cassiere non l'ha segnata come ricevuta. Chi lascia l'email riceve la
+conferma con IBAN e causale e, se la quota resta in attesa, un promemoria (dal cruscotto o dal
+workflow n8n settimanale); il cassiere ha i pulsanti "contatta", gli appunti per ogni quota e
+può segnare più quote ricevute in una volta.
+
+Ogni neo-specialista può avere in `giftTargets` un campo privato `email` (mai esposto dalle API):
+riceve un'email a ogni augurio che lo riguarda. Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
+nella PWA la propria area 🎓 (⚙️ Impostazioni → token festeggiato).
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti
 nel JSON ma non ancora nel database (per esempio un neo-specialista aggiunto dopo il primo
@@ -357,7 +386,7 @@ app/
   assistant.py     assistente vocale: prompt con i dati della festa, strumenti che agiscono sull'app, ciclo di conversazione
   mistral.py       client HTTP per le API Mistral (trascrizione, chat, voce, voci clonate) e simulatore locale
 seed/event-data.json
-n8n/               workflow n8n di esempio (report via mail, avvisi in tempo reale) + guida
+n8n/               workflow n8n di esempio (report via mail, avvisi in tempo reale, CSV ai cassieri) + guida
 tests/             pytest (30 test)
 Dockerfile, docker-compose.yml, Caddyfile
 scripts/           install-ubuntu.sh, update.sh, send-notification.sh, n8n-test-webhook.sh, backup.sh, install-backup-cron.sh

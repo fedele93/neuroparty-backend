@@ -3,7 +3,7 @@
 - I destinatari (GET /targets) espongono solo nome, regalo e coordinate di pagamento: chi dona
   direttamente copia l'IBAN o apre PayPal/Satispay, senza registrare nulla sul server.
 - La quota unica (POST /pool) viene invece registrata con la ripartizione fra i neo-specialisti:
-  serve al cassiere (vedi "giftCollector" in event-data.json) per sapere quanto girare a ognuno.
+  serve al cassiere scelto (vedi "giftCollectors" in event-data.json) per sapere quanto girare a ognuno.
   L'elenco completo è riservato al cassiere/organizzatori (X-Treasurer-Token o X-Admin-Token);
   ogni dispositivo vede solo le quote che ha registrato (X-Client-Id).
 """
@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import get_client_id, is_treasurer, require_treasurer
+from ..auth import get_client_id, require_treasurer, treasurer_scope
 from ..deps import get_db
 from ..models import (
     POOL_STATUS_PENDING,
@@ -21,8 +21,8 @@ from ..models import (
     GiftTarget,
     now_ms,
 )
-from ..schemas import PoolContributionIn, PoolStatusIn
-from ..seed import gift_collector_info
+from ..schemas import PoolBatchStatusIn, PoolContributionIn, PoolNoteIn, PoolStatusIn
+from ..seed import gift_collector_info, gift_collectors_info
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/gifts", tags=["regali"])
@@ -132,6 +132,43 @@ def _all_pool(db: Session) -> list[GiftPoolContribution]:
     return db.scalars(select(GiftPoolContribution).order_by(GiftPoolContribution.created_at.desc())).all()
 
 
+def collectors_of(request: Request) -> list[dict]:
+    return gift_collectors_info(request.app.state.event_data)
+
+
+def effective_collector_id(c: GiftPoolContribution, collectors: list[dict]) -> str:
+    """Le quote registrate prima dei cassieri multipli (collector_id vuoto) appartengono al primo."""
+    return c.collector_id or (collectors[0]["id"] if collectors else "")
+
+
+def in_scope(c: GiftPoolContribution, scope: set[str] | None, collectors: list[dict]) -> bool:
+    return scope is None or effective_collector_id(c, collectors) in scope
+
+
+def pool_rows_for(db: Session, scope: set[str] | None, collectors: list[dict]) -> list[GiftPoolContribution]:
+    return [c for c in _all_pool(db) if in_scope(c, scope, collectors)]
+
+
+def pool_board(rows: list[GiftPoolContribution], targets: list[GiftTarget], collectors: list[dict], scope: set[str] | None) -> dict:
+    """Cruscotto: totali complessivi più una sezione per ogni cassiere visibile."""
+    visible = [c for c in collectors if scope is None or c["id"] in scope]
+    by_collector = []
+    for c in visible:
+        mine = [r for r in rows if effective_collector_id(r, collectors) == c["id"]]
+        by_collector.append({"collectorId": c["id"], "collectorName": c["name"], **pool_summary(mine, targets)})
+    summary = pool_summary(rows, targets)
+    summary["byCollector"] = by_collector
+    return {
+        "collectors": [{"id": c["id"], "name": c["name"]} for c in visible],
+        "contributions": [
+            {**r.to_dict(), "collectorId": effective_collector_id(r, collectors),
+             "collectorName": r.collector_name or next((c["name"] for c in collectors if c["id"] == effective_collector_id(r, collectors)), "")}
+            for r in rows
+        ],
+        "summary": summary,
+    }
+
+
 # ---------------------------------------------------------------- destinatari e cassiere
 
 
@@ -143,8 +180,14 @@ def list_targets(db: Session = Depends(get_db)):
 
 @router.get("/collector")
 def collector(request: Request):
-    """Chi raccoglie le quote uniche, con IBAN/PayPal e metodi ammessi."""
+    """Il primo cassiere delle quote uniche (compatibilità con l'app Android 1.6)."""
     return gift_collector_info(request.app.state.event_data)
+
+
+@router.get("/collectors")
+def collectors(request: Request):
+    """Tutti i cassieri delle quote uniche, con IBAN/PayPal e metodi ammessi."""
+    return collectors_of(request)
 
 
 # ---------------------------------------------------------------- quota unica: invitati
@@ -160,10 +203,22 @@ def add_pool_contribution(
     targets = _targets(db)
     if not targets:
         raise HTTPException(409, "Nessun neo-specialista configurato")
+    collectors = collectors_of(request)
+    if not collectors:
+        raise HTTPException(409, "Nessun cassiere configurato")
+    wanted = (body.collectorId or "").strip().lower() or collectors[0]["id"]
+    collector = next((c for c in collectors if c["id"] == wanted), None)
+    if collector is None:
+        raise HTTPException(404, "Cassiere non trovato")
+    if body.paymentMethod not in collector["paymentMethods"]:
+        raise HTTPException(422, f"{collector['name']} non accetta {body.paymentMethod}")
     allocations, total = build_allocations(body, targets)
     contribution = GiftPoolContribution(
+        collector_id=collector["id"],
+        collector_name=collector["name"],
         donor_name=body.donorName,
         contact=body.contact,
+        email=body.email,
         payment_method=body.paymentMethod,
         split_mode=body.splitMode,
         total_amount=total,
@@ -178,8 +233,14 @@ def add_pool_contribution(
     db.refresh(contribution)
     result = contribution.to_dict()
     request.app.state.webhooks.emit(
-        "gift.pooled", {"contribution": result, "summary": pool_summary(_all_pool(db), targets)}
+        "gift.pooled", {"contribution": result, "summary": pool_board(_all_pool(db), targets, collectors, None)["summary"]}
     )
+    if contribution.email:
+        from ..deps import base_url_for
+        from ..mail import pool_mail
+
+        subject, text, html = pool_mail("pool_confirmation", contribution, collector, base_url_for(request))
+        result["mail"] = request.app.state.mailer.send("pool_confirmation", contribution.email, subject, text, html)
     return result
 
 
@@ -202,14 +263,15 @@ def delete_pool_contribution(
     request: Request,
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
-    treasurer: bool = Depends(is_treasurer),
+    scope: set[str] | None | bool = Depends(treasurer_scope),
 ):
     """Chi ha registrato la quota può cancellarla finché il cassiere non l'ha segnata come
-    ricevuta; il cassiere e gli organizzatori sempre."""
+    ricevuta; il suo cassiere e gli organizzatori sempre."""
     c = db.get(GiftPoolContribution, contribution_id)
     if c is None:
         raise HTTPException(404, "Quota non trovata")
     owner = bool(client_id) and c.client_id == client_id
+    treasurer = scope is not False and in_scope(c, None if scope is None else scope, collectors_of(request))
     if not treasurer:
         if not owner:
             raise HTTPException(403, "Puoi cancellare solo le quote registrate da questo dispositivo")
@@ -225,19 +287,25 @@ def delete_pool_contribution(
 # ---------------------------------------------------------------- quota unica: cassiere
 
 
-@router.get("/pool", dependencies=[Depends(require_treasurer)])
-def list_pool_contributions(db: Session = Depends(get_db)):
-    """Cruscotto del cassiere: tutte le quote uniche e i totali per neo-specialista."""
-    rows = _all_pool(db)
-    return {"contributions": [c.to_dict() for c in rows], "summary": pool_summary(rows, _targets(db))}
+@router.get("/pool")
+def list_pool_contributions(request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer)):
+    """Cruscotto: le quote uniche dei cassieri visibili al chiamante (tutti con TREASURER_TOKEN o
+    ADMIN_TOKEN, uno solo con TREASURER_TOKEN_<ID>) e i totali per cassiere e neo-specialista."""
+    collectors = collectors_of(request)
+    return pool_board(pool_rows_for(db, scope, collectors), _targets(db), collectors, scope)
 
 
-@router.patch("/pool/{contribution_id}/status", dependencies=[Depends(require_treasurer)])
-def set_pool_status(contribution_id: int, body: PoolStatusIn, db: Session = Depends(get_db)):
+@router.patch("/pool/{contribution_id}/status")
+def set_pool_status(
+    contribution_id: int, body: PoolStatusIn, request: Request,
+    db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer),
+):
     """Il cassiere segna la quota come ricevuta (o la rimette in attesa)."""
     c = db.get(GiftPoolContribution, contribution_id)
     if c is None:
         raise HTTPException(404, "Quota non trovata")
+    if not in_scope(c, scope, collectors_of(request)):
+        raise HTTPException(403, "Questa quota è stata versata a un altro cassiere")
     if c.status != body.status:
         c.status = body.status
         c.received_at = now_ms() if body.status == POOL_STATUS_RECEIVED else None
@@ -245,3 +313,43 @@ def set_pool_status(contribution_id: int, body: PoolStatusIn, db: Session = Depe
         db.commit()
         db.refresh(c)
     return c.to_dict()
+
+
+@router.patch("/pool/{contribution_id}")
+def set_pool_note(
+    contribution_id: int, body: PoolNoteIn, request: Request,
+    db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer),
+):
+    """Appunti del cassiere su una quota (es. "bonifico visto il 3/11")."""
+    c = db.get(GiftPoolContribution, contribution_id)
+    if c is None:
+        raise HTTPException(404, "Quota non trovata")
+    if not in_scope(c, scope, collectors_of(request)):
+        raise HTTPException(403, "Questa quota è stata versata a un altro cassiere")
+    c.treasurer_note = body.treasurerNote.strip()
+    db.commit()
+    db.refresh(c)
+    return c.to_dict()
+
+
+@router.post("/pool/status")
+def set_pool_status_batch(
+    body: PoolBatchStatusIn, request: Request,
+    db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer),
+):
+    """Segna più quote in una volta (ricevute o di nuovo in attesa); le quote di altri cassieri vengono saltate."""
+    collectors = collectors_of(request)
+    updated, skipped = [], []
+    for cid in body.ids:
+        c = db.get(GiftPoolContribution, cid)
+        if c is None or not in_scope(c, scope, collectors):
+            skipped.append(cid)
+            continue
+        if c.status != body.status:
+            c.status = body.status
+            c.received_at = now_ms() if body.status == POOL_STATUS_RECEIVED else None
+        updated.append(c.to_dict())
+    if updated:
+        bump_version(db)
+        db.commit()
+    return {"updated": len(updated), "skipped": skipped}

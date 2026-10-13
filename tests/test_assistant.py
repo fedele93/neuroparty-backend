@@ -113,7 +113,7 @@ def test_system_prompt_contains_event_facts(bot):
         prompt = system_prompt(avatar, bot.app.state.event_data, 54)
     assert "Sei Dott. Fedele Luisi" in prompt and "in prima persona come Fedele Luisi" in prompt
     assert "venerdì 13 novembre 2026" in prompt and "21:30" in prompt and "Giardino dei Tempi" in prompt
-    assert "Paolo Roberto" in prompt and "cifre suggerite" in prompt
+    assert "Paolo Roberto" in prompt and "Dott. Aki" in prompt and "cifre suggerite" in prompt
     assert "Stazione Ferroviaria Centrale di Bari" in prompt
 
 

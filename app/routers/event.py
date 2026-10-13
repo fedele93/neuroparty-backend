@@ -51,7 +51,9 @@ def state(request: Request, db: Session = Depends(get_db)):
         "version": get_version(db),
         "serverTime": now_ms(),
         "adminEnabled": bool(request.app.state.settings.admin_token),
-        "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.admin_token),
+        "treasurerEnabled": bool(
+            request.app.state.settings.treasurer_token or request.app.state.settings.admin_token or request.app.state.settings.treasurer_tokens
+        ),
         "pushSubscriptions": subscription_count(db),
     }
 

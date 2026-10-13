@@ -1,0 +1,140 @@
+"""Fase 4: area festeggiato, strumenti dei cassieri (note, stato in blocco, promemoria), email al donatore e al festeggiato."""
+
+
+from conftest import ADMIN, make_client
+from test_automation import N8N_URL, FakeN8n
+
+ROBERTO = {"X-Treasurer-Token": "tok-roberto"}
+AKI = {"X-Treasurer-Token": "tok-aki"}
+LUISI = {"X-Graduate-Token": "tok-luisi"}
+
+
+def _mails(n8n: FakeN8n) -> list[dict]:
+    return [n8n.payload(i)["data"] for i, e in enumerate(n8n.events) if e == "mail.send"]
+
+
+def _client(tmp_path, n8n: FakeN8n, **kw):
+    c = make_client(
+        tmp_path, webhook_url=N8N_URL, webhook_secret="shh", webhook_handler=n8n,
+        treasurer_tokens={"roberto": "tok-roberto", "aki": "tok-aki"}, graduate_tokens={"luisi": "tok-luisi"},
+        assistant_fake=True, **kw,
+    )
+    c.app.state.mailer.sync = True
+    return c
+
+
+def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n) as c:
+        body = {"collectorId": "roberto", "donorName": "Anna Verdi", "email": "Anna@Example.org", "paymentMethod": "IBAN",
+                "splitMode": "EQUAL", "totalAmount": 90, "graduateIds": ["luisi", "carlone", "prezioso"]}
+        r = c.post("/api/gifts/pool", json=body, headers={"X-Client-Id": "tel-anna"})
+        assert r.status_code == 201, r.text
+        q = r.json()
+        assert q["email"] == "anna@example.org" and q["treasurerNote"] == "" and q["mail"]["status"] == "DELIVERED" and q["mail"]["kind"] == "pool_confirmation"
+        mails = _mails(n8n)
+        assert len(mails) == 1 and mails[0]["kind"] == "pool_confirmation" and mails[0]["to"] == "anna@example.org"
+        assert "90,00 €" in mails[0]["subject"] and "Paolo Roberto" in mails[0]["subject"]
+        assert "IBAN" in mails[0]["text"] and "Anna Verdi" in mails[0]["text"] and "30,00 €" in mails[0]["text"]
+        # email non valida -> 422; senza email nessuna mail
+        bad = {**body, "email": "non-una-mail"}
+        assert c.post("/api/gifts/pool", json=bad, headers={"X-Client-Id": "x"}).status_code == 422
+        r2 = c.post("/api/gifts/pool", json={**body, "email": "", "donorName": "Bruno", "collectorId": "aki", "paymentMethod": "Contanti"}, headers={"X-Client-Id": "tel-bruno"})
+        assert r2.status_code == 201 and "mail" not in r2.json() and len(_mails(n8n)) == 1
+
+        # nota del cassiere: solo nel proprio ambito
+        r = c.patch(f"/api/gifts/pool/{q['id']}", json={"treasurerNote": " bonifico visto il 3/11 "}, headers=ROBERTO)
+        assert r.status_code == 200 and r.json()["treasurerNote"] == "bonifico visto il 3/11"
+        assert c.patch(f"/api/gifts/pool/{q['id']}", json={"treasurerNote": "x"}, headers=AKI).status_code == 403
+        assert c.patch(f"/api/gifts/pool/{q['id']}", json={"treasurerNote": "x"}).status_code == 403
+        assert c.patch("/api/gifts/pool/9999", json={"treasurerNote": "x"}, headers=ADMIN).status_code == 404
+        mine = c.get("/api/gifts/pool/mine", headers={"X-Client-Id": "tel-anna"}).json()
+        assert mine[0]["treasurerNote"] == "bonifico visto il 3/11"
+
+        # stato in blocco: le quote di altri cassieri vengono saltate
+        ids = [q["id"], r2.json()["id"]]
+        r = c.post("/api/gifts/pool/status", json={"ids": ids + [9999], "status": "RECEIVED"}, headers=ROBERTO)
+        assert r.status_code == 200 and r.json() == {"updated": 1, "skipped": [r2.json()["id"], 9999]}
+        rows = {x["id"]: x for x in c.get("/api/gifts/pool", headers=ADMIN).json()["contributions"]}
+        assert rows[q["id"]]["status"] == "RECEIVED" and rows[q["id"]]["receivedAt"] and rows[r2.json()["id"]]["status"] == "PENDING"
+        r = c.post("/api/gifts/pool/status", json={"ids": ids, "status": "PENDING"}, headers=ADMIN)
+        assert r.json() == {"updated": 2, "skipped": []}
+        assert c.post("/api/gifts/pool/status", json={"ids": ids, "status": "BOH"}, headers=ADMIN).status_code == 422
+
+        # promemoria: solo quote in attesa, con email, più vecchie di N giorni, nel proprio ambito
+        assert c.post("/api/mail/reminders/pool", headers=AKI).json()["sent"] == 0  # Bruno non ha email
+        assert c.post("/api/mail/reminders/pool?days=7", headers=ROBERTO).json()["sent"] == 0  # troppo recente
+        r = c.post("/api/mail/reminders/pool?days=0", headers=ROBERTO)
+        assert r.status_code == 200 and r.json()["sent"] == 1
+        last = _mails(n8n)[-1]
+        assert last["kind"] == "pool_reminder" and last["to"] == "anna@example.org" and "ancora in attesa" in last["subject"]
+        assert c.post("/api/mail/reminders/pool?days=0", headers=AKI).json()["sent"] == 0
+        assert c.post("/api/mail/reminders/pool?days=0").status_code == 403
+        # ricevuta -> niente più promemoria
+        c.post("/api/gifts/pool/status", json={"ids": [q["id"]], "status": "RECEIVED"}, headers=ROBERTO)
+        assert c.post("/api/mail/reminders/pool?days=0", headers=ADMIN).json()["sent"] == 0
+        # il CSV: ?collector= restringe (n8n manda a ogni cassiere il suo), ma non oltre il proprio ambito
+        csv_all = c.get("/api/export/gift-pool.csv", headers=ADMIN).text
+        csv_aki = c.get("/api/export/gift-pool.csv?collector=aki", headers=ADMIN).text
+        assert "Anna Verdi" in csv_all and "Bruno" in csv_all and "Bruno" in csv_aki and "Anna Verdi" not in csv_aki
+        assert c.get("/api/export/gift-pool.csv?collector=aki", headers=ROBERTO).status_code == 403
+        assert "Anna Verdi" in c.get("/api/export/gift-pool.csv?collector=roberto", headers=ROBERTO).text
+
+
+def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n) as c:
+        # senza email privata del festeggiato nessuna mail per gli auguri
+        c.post("/api/wishes", json={"authorName": "Zia Pina", "targetGraduate": "Fedele Luisi", "message": "Bravo!"}, headers={"X-Client-Id": "z"})
+        assert _mails(n8n) == []
+        # email del festeggiato (privata: non esce dalle API pubbliche)
+        from app.models import GiftTarget
+        with c.app.state.session_factory() as db:
+            t = db.get(GiftTarget, "luisi")
+            t.email = "fedele@example.org"
+            db.commit()
+        pub = next(t for t in c.get("/api/gifts/targets").json() if t["id"] == "luisi")
+        assert "email" not in pub and pub["shortName"] == "Fedele Luisi"
+        r = c.post("/api/wishes", json={"authorName": "Nonna", "targetGraduate": "Fedele Luisi", "message": "Auguri dottore"}, headers={"X-Client-Id": "n"})
+        assert r.status_code == 201
+        mails = _mails(n8n)
+        assert len(mails) == 1 and mails[0]["kind"] == "wish_received" and mails[0]["to"] == "fedele@example.org"
+        assert "Nonna" in mails[0]["subject"] and "Auguri dottore" in mails[0]["text"]
+        c.post("/api/wishes", json={"authorName": "Tutti", "targetGraduate": "Tutti i Laureandi", "message": "Evviva"}, headers={"X-Client-Id": "t"})
+        assert len(_mails(n8n)) == 1
+
+        # area festeggiato
+        assert c.get("/api/graduate/me").status_code == 403
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "sbagliato"}).status_code == 403
+        assert c.get("/api/graduate/me", headers=ADMIN).status_code == 422
+        assert c.get("/api/graduate/me?graduate_id=nessuno", headers=ADMIN).status_code == 404
+        me = c.get("/api/graduate/me", headers=LUISI).json()
+        assert me["graduate"]["id"] == "luisi" and me["graduate"]["email"] == "fedele@example.org" and me["graduate"]["iban"]
+        assert "collectedAmount" not in me["graduate"] and "pool" not in me
+        assert me["guests"]["confirmedGuests"] >= 1 and isinstance(me["guests"]["confirmed"], list) and "pending" in me["guests"]
+        # 2 auguri di questo test + quello dimostrativo dei colleghi; quelli per altri festeggiati non ci sono
+        assert me["wishesForMe"] == 3 and [w["message"] for w in me["wishes"]][:2] == ["Evviva", "Auguri dottore"]
+        assert all(w["targetGraduate"] in ("Fedele Luisi", "Tutti i Laureandi") for w in me["wishes"])
+        assert me["bus"]["maxSeats"] == 54 and "passengers" in me["bus"]
+        assert me["avatar"]["id"] == "luisi" and me["assistantConfigured"] is True
+        # con token organizzatore serve l'id
+        assert c.get("/api/graduate/me?graduate_id=luisi", headers=ADMIN).json()["graduate"]["id"] == "luisi"
+
+        # il festeggiato gestisce solo il proprio avatar
+        lst = c.get("/api/assistant/admin/avatars", headers=LUISI).json()
+        assert [a["id"] for a in lst["avatars"]] == ["luisi"]
+        assert len(c.get("/api/assistant/admin/avatars", headers=ADMIN).json()["avatars"]) == 9
+        assert c.get("/api/assistant/admin/avatars").status_code == 403
+        r = c.put("/api/assistant/admin/avatars/luisi", json={"persona": "Sono Fedele, parlo piano."}, headers=LUISI)
+        assert r.status_code == 200 and r.json()["persona"] == "Sono Fedele, parlo piano."
+        assert c.put("/api/assistant/admin/avatars/carlone", json={"persona": "x"}, headers=LUISI).status_code == 403
+        assert c.get("/api/assistant/admin/voices", headers=LUISI).status_code == 200
+        assert c.post("/api/assistant/admin/avatars/carlone/preview", json={"text": "ciao"}, headers=LUISI).status_code == 403
+        assert c.post("/api/assistant/admin/avatars/luisi/preview", json={"text": "ciao"}, headers=LUISI).status_code == 200
+
+
+def test_graduate_without_tokens_is_503(tmp_path):
+    with make_client(tmp_path, admin_token="") as c:
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 503
+    with make_client(tmp_path / "b") as c:  # con ADMIN_TOKEN ma senza token festeggiati: 403, non 503
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 403

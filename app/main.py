@@ -12,9 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from .assistant import VoiceResolver
 from .config import Settings
 from .db import ensure_schema, make_engine, make_session_factory
+from .mail import Mailer
 from .mistral import FakeMistralClient, MistralClient
 from .push import PushService
-from .routers import assistant, automation, bus, event, export, gifts, guests, notifications, photos, push, wishes
+from .routers import assistant, automation, bus, event, export, gifts, graduate, guests, mail, notifications, photos, profile, push, wishes
 from .scheduler import run_scheduler
 from .seed import load_event_file, seed_database
 from .validation import placeholder_gift_issues
@@ -40,11 +41,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with suppress(asyncio.CancelledError):
                 await task
             app.state.webhooks.close()
+            app.state.mailer.close()
             app.state.assistant.client.close()
 
     app = FastAPI(
         title="NeuroParty API",
-        version="1.4.0",
+        version="1.5.0",
         description="Backend condiviso per l'app Android e la PWA della festa di specializzazione in Neurologia.",
         lifespan=lifespan,
     )
@@ -91,6 +93,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.n8n_webhook_secret:
             log.warning("N8N_WEBHOOK_SECRET non impostato: n8n non potrà verificare che le chiamate arrivino da questo server")
 
+    # Email agli invitati: preparate qui, spedite da n8n (evento mail.send). Vedi app/mail.py.
+    app.state.mailer = Mailer(app.state.webhooks, app.state.session_factory)
+    if not app.state.mailer.enabled:
+        log.info("Email disattivate: N8N_WEBHOOK_URL vuoto o evento mail.send escluso da N8N_WEBHOOK_EVENTS")
+
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or ["*"]
     app.add_middleware(
         CORSMiddleware,
@@ -100,9 +107,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant):
+    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant, profile, mail, graduate):
         app.include_router(r.router)
     app.include_router(assistant.admin)
+    app.include_router(mail.reminders)
+    app.include_router(mail.pool_reminders)
 
     # Foto caricate dagli invitati
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")

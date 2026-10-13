@@ -22,9 +22,29 @@ class Guest(Base):
     contact_info: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     owner_client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ---- profilo personale (utenza leggera: link di accesso via email, vedi app/routers/profile.py)
+    email: Mapped[str] = mapped_column(String(200), default="")
+    phone: Mapped[str] = mapped_column(String(100), default="")
+    menu: Mapped[str] = mapped_column(String(30), default="")  # STANDARD | VEGETARIANO | VEGANO | SENZA_GLUTINE | ALTRO
+    companions_json: Mapped[str] = mapped_column(Text, default="[]")  # [{name, menu, notes}]
+    access_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    token_created_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    consent_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_login_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    def to_dict(self) -> dict:
-        return {
+    @property
+    def companions(self) -> list[dict]:
+        import json
+
+        try:
+            data = json.loads(self.companions_json or "[]")
+        except ValueError:
+            return []
+        return [c for c in data if isinstance(c, dict)]
+
+    def to_dict(self, private: bool = False) -> dict:
+        """Dati pubblici (lista invitati). Con private=True anche contatti e consenso (profilo e organizzatori)."""
+        d = {
             "id": self.id,
             "fullName": self.full_name,
             "category": self.category,
@@ -32,8 +52,56 @@ class Guest(Base):
             "guestsCount": self.guests_count,
             "dietaryNotes": self.dietary_notes,
             "contactInfo": self.contact_info,
+            "menu": self.menu,
+            "companions": [{"name": c.get("name", ""), "menu": c.get("menu", ""), "notes": c.get("notes", "")} for c in self.companions],
+            "hasProfile": bool(self.access_token),
             "updatedAt": self.updated_at,
             "ownerClientId": self.owner_client_id,
+        }
+        if private:
+            d.update({
+                "email": self.email,
+                "phone": self.phone,
+                "consentAt": self.consent_at,
+                "lastLoginAt": self.last_login_at,
+                "tokenCreatedAt": self.token_created_at,
+            })
+        return d
+
+
+MAIL_QUEUED = "QUEUED"
+MAIL_DELIVERED = "DELIVERED"
+MAIL_FAILED = "FAILED"
+MAIL_SKIPPED = "SKIPPED"
+
+
+class MailOutbox(Base):
+    """Email preparate dal backend e consegnate a n8n (evento mail.send), con l'esito."""
+    __tablename__ = "mail_outbox"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    to_email: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(300))
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(20), default=MAIL_QUEUED)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    guest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    delivered_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "to": self.to_email,
+            "subject": self.subject,
+            "status": self.status,
+            "attempts": self.attempts,
+            "error": self.error,
+            "guestId": self.guest_id,
+            "createdAt": self.created_at,
+            "deliveredAt": self.delivered_at,
         }
 
 
@@ -47,6 +115,11 @@ class BusBooking(Base):
     contact_phone: Mapped[str] = mapped_column(String(100), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     booked_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    # ---- fase 3: prenotazione dal profilo, lista d'attesa, codice e check-in
+    guest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="CONFIRMED")  # CONFIRMED | WAITLIST
+    code: Mapped[str] = mapped_column(String(16), default="")
+    checked_in_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     owner_client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def to_dict(self) -> dict:
@@ -59,6 +132,10 @@ class BusBooking(Base):
             "contactPhone": self.contact_phone,
             "notes": self.notes,
             "bookedAt": self.booked_at,
+            "guestId": self.guest_id,
+            "status": self.status or "CONFIRMED",
+            "code": self.code,
+            "checkedInAt": self.checked_in_at,
             "ownerClientId": self.owner_client_id,
         }
 
@@ -123,12 +200,20 @@ class GiftTarget(Base):
     iban_holder: Mapped[str] = mapped_column(String(200), default="")
     satispay_url: Mapped[str] = mapped_column(String(300), default="")
     paypal_me_url: Mapped[str] = mapped_column(String(300), default="")
+    email: Mapped[str] = mapped_column(String(200), default="")  # privata: avvisi al festeggiato (auguri ricevuti)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    @property
+    def short_name(self) -> str:
+        import re
+
+        return re.sub(r"^Dott\.(ssa)?\s*", "", self.name, flags=re.IGNORECASE)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "specialization": self.specialization,
             "roleTitle": self.role_title,
             "giftTitle": self.gift_title,
@@ -145,12 +230,16 @@ POOL_STATUS_RECEIVED = "RECEIVED"
 
 
 class GiftPoolContribution(Base):
-    """Quota unica versata al cassiere (vedi "giftCollector" in event-data.json) e ripartita
-    fra i neo-specialisti. Visibile solo al cassiere/organizzatori e a chi l'ha registrata."""
+    """Quota unica versata a uno dei cassieri (vedi "giftCollectors" in event-data.json) e ripartita
+    fra i neo-specialisti. Visibile solo al suo cassiere/organizzatori e a chi l'ha registrata."""
     __tablename__ = "gift_pool_contributions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    collector_id: Mapped[str] = mapped_column(String(64), default="")  # vuoto = primo cassiere del JSON
+    collector_name: Mapped[str] = mapped_column(String(200), default="")
     donor_name: Mapped[str] = mapped_column(String(200))
     contact: Mapped[str] = mapped_column(String(200), default="")
+    email: Mapped[str] = mapped_column(String(200), default="")  # per conferma e promemoria al donatore
+    treasurer_note: Mapped[str] = mapped_column(Text, default="")  # appunti del cassiere
     payment_method: Mapped[str] = mapped_column(String(20), default="IBAN")  # IBAN | PayPal | Contanti
     split_mode: Mapped[str] = mapped_column(String(10), default="EQUAL")  # EQUAL | CUSTOM
     total_amount: Mapped[float] = mapped_column(Float)
@@ -170,8 +259,12 @@ class GiftPoolContribution(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "collectorId": self.collector_id,
+            "collectorName": self.collector_name,
             "donorName": self.donor_name,
             "contact": self.contact,
+            "email": self.email,
+            "treasurerNote": self.treasurer_note,
             "paymentMethod": self.payment_method,
             "splitMode": self.split_mode,
             "totalAmount": self.total_amount,

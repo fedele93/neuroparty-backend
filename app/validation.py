@@ -21,13 +21,16 @@ def iban_is_valid(iban: str) -> bool:
 def placeholder_gift_issues(data: dict) -> list[str]:
     """Elenco (vuoto se tutto ok) dei regali e del cassiere con IBAN non valido o mancante."""
     issues = []
-    collector = data.get("giftCollector") or {}
-    if collector:
-        iban = (collector.get("iban") or "").strip()
+    collectors = data.get("giftCollectors")
+    if collectors is None:
+        collectors = [data["giftCollector"]] if data.get("giftCollector") else []
+    for c in collectors:
+        label = f"cassiere '{c.get('id') or c.get('name')}'"
+        iban = (c.get("iban") or "").strip()
         if not iban:
-            issues.append("cassiere (giftCollector): IBAN mancante")
+            issues.append(f"{label}: IBAN mancante")
         elif not iban_is_valid(iban):
-            issues.append(f"cassiere (giftCollector): IBAN non valido (segnaposto?) {iban}")
+            issues.append(f"{label}: IBAN non valido (segnaposto?) {iban}")
     for t in data.get("giftTargets", []):
         iban = (t.get("iban") or "").strip()
         if not iban:
