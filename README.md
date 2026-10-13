@@ -336,7 +336,7 @@ timeline, mappa, navetta e il file calendario si aggiornano da soli.
 La sezione Regali non mostra mai cifre raccolte o obiettivi: chi vuole donare a un singolo
 neo-specialista trova nella sua card l'IBAN da copiare e i link PayPal e Satispay, senza
 registrare nulla. Chi preferisce fare **un solo versamento** lo fa a uno dei **cassieri**
-(`giftCollectors` nel JSON, oggi Dott. Paolo Roberto e Dott. Aki: id, nome, IBAN, PayPal, causale
+(`giftCollectors` nel JSON, oggi Dott. Paolo Roberto e Dott. Akilesh Bhunjun: id, nome, IBAN, PayPal, causale
 suggerita; metodi ammessi IBAN, PayPal e contanti), scegliendo se dividere la quota in parti
 uguali fra i neo-specialisti o personalizzarla. Queste quote vengono registrate sul server con
 il cassiere e la ripartizione e sono visibili solo ai cassieri e agli organizzatori: nella PWA,

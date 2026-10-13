@@ -15,7 +15,7 @@ def test_health_and_event(client):
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
-    assert ev["giftCollectors"][1]["name"] == "Dott. Aki" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
+    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
 
 
 def test_demo_seed_matches_json(client):
@@ -120,7 +120,7 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
     collector = client.get("/api/gifts/collector").json()
     assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
     assert "Satispay" not in collector["paymentMethods"]
-    assert [c["name"] for c in client.get("/api/gifts/collectors").json()] == ["Dott. Paolo Roberto", "Dott. Aki"]
+    assert [c["name"] for c in client.get("/api/gifts/collectors").json()] == ["Dott. Paolo Roberto", "Dott. Akilesh Bhunjun"]
     # elenco e stato riservati al cassiere/organizzatori
     assert client.get("/api/gifts/pool").status_code == 403
     assert client.get("/api/gifts/pool", headers={"X-Treasurer-Token": "sbagliato"}).status_code == 403
@@ -148,7 +148,7 @@ def test_pool_equal_split(client):
 
     # quota versata al secondo cassiere
     r = client.post("/api/gifts/pool", json={"donorName": "Cugina", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "PayPal"})
-    assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Aki"
+    assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Akilesh Bhunjun"
     assert client.post("/api/gifts/pool", json={"donorName": "X", "totalAmount": 45, "collectorId": "nessuno"}).status_code == 404
 
     # solo alcuni neo-specialisti (es. escludo me stesso)
@@ -248,9 +248,9 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert rows["Colleghi Reparto Stroke"][1] == "Dott. Paolo Roberto"
         assert rows["Colleghi Reparto Stroke"][5:9] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
         assert rows["Colleghi Reparto Stroke"][12] == "50,00" and rows["Colleghi Reparto Stroke"][13] == ""  # luisi, carlone
-        assert rows["Amici del corso"][1] == "Dott. Aki" and rows["Amici del corso"][7:9] == ["90,00", "In attesa"] and rows["Amici del corso"][12] == "10,00"
+        assert rows["Amici del corso"][1] == "Dott. Akilesh Bhunjun" and rows["Amici del corso"][7:9] == ["90,00", "In attesa"] and rows["Amici del corso"][12] == "10,00"
         assert lines[4].split(";")[0] == "TOTALE DOTT. PAOLO ROBERTO" and lines[4].split(";")[7] == "330,00"
-        assert lines[5].split(";")[0] == "TOTALE DOTT. AKI" and lines[5].split(";")[7] == "90,00" and lines[5].split(";")[12] == "10,00"
+        assert lines[5].split(";")[0] == "TOTALE DOTT. AKILESH BHUNJUN" and lines[5].split(";")[7] == "90,00" and lines[5].split(";")[12] == "10,00"
         assert lines[6].split(";")[:8] == ["TOTALE", "", "", "", "", "", "", "420,00"] and lines[6].split(";")[12] == "80,00"
         assert lines[7].split(";")[:8] == ["DI CUI RICEVUTO", "", "", "", "", "", "", "330,00"] and lines[7].split(";")[12] == "70,00"
 
@@ -279,7 +279,7 @@ def test_per_collector_treasurer_token_sees_only_own_quotas(tmp_path, monkeypatc
         mine = board["contributions"][0]
         assert c.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "RECEIVED"}, headers=AKI).status_code == 200
         lines = c.get("/api/export/gift-pool.csv", headers=AKI).text.lstrip("\ufeff").splitlines()
-        assert len(lines) == 1 + 1 + 2 and all("Dott. Aki" in ln or ln.startswith(("Data;", "TOTALE", "DI CUI")) for ln in lines)
+        assert len(lines) == 1 + 1 + 2 and all("Dott. Akilesh Bhunjun" in ln or ln.startswith(("Data;", "TOTALE", "DI CUI")) for ln in lines)
         assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "sbagliato"}).status_code == 403
         assert c.delete(f"/api/gifts/pool/{mine['id']}", headers=AKI).status_code == 204  # il suo cassiere può sempre
 
