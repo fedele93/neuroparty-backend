@@ -211,7 +211,7 @@ già inoltrato al container `api`):
 1. **n8n legge dal backend** (per report periodici): con il token di sola lettura
    `AUTOMATION_TOKEN` (header `X-Automation-Token`) n8n può chiamare
    - `GET /api/automation/report` — JSON completo: coperti confermati e menu speciali, posti
-     navetta per fermata, quote uniche al cassiere (totali e per neo-specialista), novità nelle
+     navetta per fermata, quote uniche ai cassieri (solo conteggi, mai cifre), novità nelle
      ultime `sinceHours` ore (default 24: nuovi RSVP, prenotazioni, quote, auguri, foto),
      notifiche programmate;
    - `GET /api/automation/report.txt` e `.html` — lo stesso report già impaginato, da incollare
