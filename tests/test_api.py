@@ -241,18 +241,18 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert 'filename="quote-uniche.csv"' in r.headers["content-disposition"]
         lines = r.text.lstrip("\ufeff").splitlines()
         head = lines[0].split(";")
-        assert head[:10] == ["Data", "Cassiere", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
-        assert head[10:] == [t["name"] for t in c.get("/api/gifts/targets").json()]
+        assert head[:12] == ["Data", "Cassiere", "Donatore", "Contatto", "Email", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note", "Appunti cassiere"]
+        assert head[12:] == [t["name"] for t in c.get("/api/gifts/targets").json()]
         assert len(lines) == 1 + 3 + 2 + 2  # intestazione, 3 quote, 2 totali per cassiere, totale e ricevuto
         rows = {ln.split(";")[2]: ln.split(";") for ln in lines[1:4]}
         assert rows["Colleghi Reparto Stroke"][1] == "Dott. Paolo Roberto"
-        assert rows["Colleghi Reparto Stroke"][4:8] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
-        assert rows["Colleghi Reparto Stroke"][10] == "50,00" and rows["Colleghi Reparto Stroke"][11] == ""  # luisi, carlone
-        assert rows["Amici del corso"][1] == "Dott. Aki" and rows["Amici del corso"][6:8] == ["90,00", "In attesa"] and rows["Amici del corso"][10] == "10,00"
-        assert lines[4].split(";")[0] == "TOTALE DOTT. PAOLO ROBERTO" and lines[4].split(";")[6] == "330,00"
-        assert lines[5].split(";")[0] == "TOTALE DOTT. AKI" and lines[5].split(";")[6] == "90,00" and lines[5].split(";")[10] == "10,00"
-        assert lines[6].split(";")[:7] == ["TOTALE", "", "", "", "", "", "420,00"] and lines[6].split(";")[10] == "80,00"
-        assert lines[7].split(";")[:7] == ["DI CUI RICEVUTO", "", "", "", "", "", "330,00"] and lines[7].split(";")[10] == "70,00"
+        assert rows["Colleghi Reparto Stroke"][5:9] == ["PayPal", "Personalizzata", "150,00", "Ricevuta"]
+        assert rows["Colleghi Reparto Stroke"][12] == "50,00" and rows["Colleghi Reparto Stroke"][13] == ""  # luisi, carlone
+        assert rows["Amici del corso"][1] == "Dott. Aki" and rows["Amici del corso"][7:9] == ["90,00", "In attesa"] and rows["Amici del corso"][12] == "10,00"
+        assert lines[4].split(";")[0] == "TOTALE DOTT. PAOLO ROBERTO" and lines[4].split(";")[7] == "330,00"
+        assert lines[5].split(";")[0] == "TOTALE DOTT. AKI" and lines[5].split(";")[7] == "90,00" and lines[5].split(";")[12] == "10,00"
+        assert lines[6].split(";")[:8] == ["TOTALE", "", "", "", "", "", "", "420,00"] and lines[6].split(";")[12] == "80,00"
+        assert lines[7].split(";")[:8] == ["DI CUI RICEVUTO", "", "", "", "", "", "", "330,00"] and lines[7].split(";")[12] == "70,00"
 
     with make_client(tmp_path / "b", admin_token="", treasurer_token="") as c:
         assert c.get("/api/gifts/pool", headers=TREASURER).status_code == 503

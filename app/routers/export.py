@@ -122,18 +122,18 @@ def export_gift_pool(request: Request, collector: str = "", db: Session = Depend
             if is_received:
                 received[g] += amount
         data.append([
-            _fmt_ts(c.created_at), cname, c.donor_name, c.contact, c.payment_method, SPLIT_LABELS.get(c.split_mode, c.split_mode),
-            _fmt_amount(c.total_amount), POOL_STATUS_LABELS.get(c.status, c.status), _fmt_ts(c.received_at), c.note,
+            _fmt_ts(c.created_at), cname, c.donor_name, c.contact, c.email or "", c.payment_method, SPLIT_LABELS.get(c.split_mode, c.split_mode),
+            _fmt_amount(c.total_amount), POOL_STATUS_LABELS.get(c.status, c.status), _fmt_ts(c.received_at), c.note, c.treasurer_note or "",
             *[_fmt_amount(per.get(g)) for g in columns],
         ])
-    fixed = ["Data", "Cassiere", "Donatore", "Contatto", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note"]
+    fixed = ["Data", "Cassiere", "Donatore", "Contatto", "Email", "Metodo", "Ripartizione", "Totale", "Stato", "Ricevuta il", "Note", "Appunti cassiere"]
     blanks = [""] * 8
     if len(per_collector) > 1:
         for pc in per_collector.values():
-            data.append([f"TOTALE {pc['name'].upper()}", "", *blanks[:4], _fmt_amount(pc["total"]), "", "", "",
+            data.append([f"TOTALE {pc['name'].upper()}", "", *blanks[:5], _fmt_amount(pc["total"]), "", "", "", "",
                          *[_fmt_amount(pc["by"].get(g, 0.0)) for g in columns]])
     total_all = sum(c.total_amount for c in rows)
     total_received = sum(c.total_amount for c in rows if c.status == POOL_STATUS_RECEIVED)
-    data.append(["TOTALE", "", *blanks[:4], _fmt_amount(total_all), "", "", "", *[_fmt_amount(totals[g]) for g in columns]])
-    data.append(["DI CUI RICEVUTO", "", *blanks[:4], _fmt_amount(total_received), "", "", "", *[_fmt_amount(received[g]) for g in columns]])
+    data.append(["TOTALE", "", *blanks[:5], _fmt_amount(total_all), "", "", "", "", *[_fmt_amount(totals[g]) for g in columns]])
+    data.append(["DI CUI RICEVUTO", "", *blanks[:5], _fmt_amount(total_received), "", "", "", "", *[_fmt_amount(received[g]) for g in columns]])
     return _csv_response("quote-uniche.csv", fixed + [names[g] for g in columns], data)

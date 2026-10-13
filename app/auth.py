@@ -131,13 +131,17 @@ def graduate_scope(
     x_admin_token: str | None = Header(default=None),
     x_graduate_token: str | None = Header(default=None),
 ) -> set[str] | None | bool:
-    """None = organizzatore (tutti i festeggiati); set = GRADUATE_TOKEN_<ID>; False = nessun token valido."""
+    """None = organizzatore (tutti i festeggiati); set = GRADUATE_TOKEN_<ID>; False = nessun token valido.
+    Il token festeggiato, se inviato, prevale su quello organizzatore (chi li ha entrambi vede la propria area)
+    e se è sbagliato non vale nemmeno l'organizzatore: così la PWA può scartarlo subito."""
     settings = request.app.state.settings
+    if x_graduate_token:
+        for graduate_id, token in settings.graduate_tokens.items():
+            if _matches(x_graduate_token, token):
+                return {graduate_id}
+        return False
     if _matches(x_admin_token, settings.admin_token):
         return None
-    for graduate_id, token in settings.graduate_tokens.items():
-        if _matches(x_graduate_token, token):
-            return {graduate_id}
     return False
 
 
