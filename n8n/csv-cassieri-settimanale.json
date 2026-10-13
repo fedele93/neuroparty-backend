@@ -40,7 +40,7 @@
       {
        "id": "a3",
        "name": "cassieri",
-       "value": "[{\"id\":\"roberto\",\"nome\":\"Dott. Paolo Roberto\",\"email\":\"paolo@example.org\"},{\"id\":\"aki\",\"nome\":\"Dott. Aki\",\"email\":\"aki@example.org\"}]",
+       "value": "[{\"id\":\"roberto\",\"nome\":\"Dott. Paolo Roberto\",\"email\":\"paolo@example.org\"},{\"id\":\"aki\",\"nome\":\"Dott. Akilesh Bhunjun\",\"email\":\"aki@example.org\"}]",
        "type": "string"
       },
       {
