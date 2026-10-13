@@ -6,6 +6,8 @@
   (invitato, prenotazione bus) può poi modificarlo o cancellarlo.
 - X-Automation-Token: token di sola lettura per le automazioni (n8n): report, riepiloghi,
   export CSV. Anche X-Admin-Token è accettato su questi endpoint.
+- X-Graduate-Token: token di un festeggiato (GRADUATE_TOKEN_<ID>): area festeggiato e il proprio
+  avatar dell'assistente. Anche X-Admin-Token è accettato.
 - X-Treasurer-Token: token dei cassieri delle quote uniche (TREASURER_TOKEN per tutti, oppure
   TREASURER_TOKEN_<ID> per un solo cassiere): elenco e stato delle quote, CSV. Anche
   X-Admin-Token è accettato su questi endpoint.
@@ -122,6 +124,36 @@ def require_treasurer_or_automation(
     if not (_any_treasurer_token(settings) or settings.automation_token):
         raise HTTPException(status_code=503, detail="Nessun token configurato sul server")
     raise HTTPException(status_code=403, detail="Token cassiere, organizzatore o automazioni non valido")
+
+
+def graduate_scope(
+    request: Request,
+    x_admin_token: str | None = Header(default=None),
+    x_graduate_token: str | None = Header(default=None),
+) -> set[str] | None | bool:
+    """None = organizzatore (tutti i festeggiati); set = GRADUATE_TOKEN_<ID>; False = nessun token valido."""
+    settings = request.app.state.settings
+    if _matches(x_admin_token, settings.admin_token):
+        return None
+    for graduate_id, token in settings.graduate_tokens.items():
+        if _matches(x_graduate_token, token):
+            return {graduate_id}
+    return False
+
+
+def require_graduate(
+    request: Request,
+    x_admin_token: str | None = Header(default=None),
+    x_graduate_token: str | None = Header(default=None),
+) -> set[str] | None:
+    """Area festeggiato: GRADUATE_TOKEN_<ID> oppure ADMIN_TOKEN. Ritorna i festeggiati visibili (None = tutti)."""
+    settings = request.app.state.settings
+    if not settings.admin_token and not settings.graduate_tokens:
+        raise HTTPException(status_code=503, detail="ADMIN_TOKEN/GRADUATE_TOKEN non configurati sul server")
+    scope = graduate_scope(request, x_admin_token, x_graduate_token)
+    if scope is False:
+        raise HTTPException(status_code=403, detail="Token festeggiato o organizzatore non valido")
+    return scope
 
 
 def can_modify(owner_client_id: str | None, admin: bool, client_id: str | None) -> bool:

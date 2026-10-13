@@ -4,11 +4,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin, require_automation
+from ..auth import require_admin, require_automation, require_treasurer_or_automation
 from ..deadlines import deadline, deadline_passed
 from ..deps import base_url_for, get_db
 from ..mail import KINDS, bus_mail, format_date_it, menu_reminder_mail, test_mail
-from ..models import BusBooking, Guest, MailOutbox
+from ..models import BusBooking, Guest, MailOutbox, now_ms
+from .gifts import collectors_of, effective_collector_id, pool_rows_for
 
 router = APIRouter(prefix="/api/mail", tags=["email"], dependencies=[Depends(require_admin)])
 # Promemoria: anche con il token automazioni, così n8n può lanciarli a orario (es. il giorno prima)
@@ -84,4 +85,26 @@ def remind_bus(request: Request, db: Session = Depends(get_db)):
             continue
         subject, text, html, attachments = bus_mail("bus_reminder", g, b, request)
         sent.append(request.app.state.mailer.send("bus_reminder", g.email, subject, text, html, guest_id=g.id, attachments=attachments))
+    return {"sent": len(sent), "mails": sent}
+
+
+pool_reminders = APIRouter(prefix="/api/mail/reminders", tags=["email"])
+
+
+@pool_reminders.post("/pool")
+def remind_pool(request: Request, days: int = 7, db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer_or_automation)):
+    """Promemoria ai donatori con quota unica ancora in attesa da almeno `days` giorni e con un'email
+    (cassiere: solo le proprie quote; organizzatori e automazioni: tutte)."""
+    collectors = {c["id"]: c for c in collectors_of(request)}
+    limit = now_ms() - max(0, days) * 86_400_000
+    sent = []
+    for c in pool_rows_for(db, scope, list(collectors.values())):
+        email = c.email or (c.contact if "@" in (c.contact or "") and " " not in c.contact else "")
+        if c.status == "RECEIVED" or not email or (c.created_at or 0) > limit:
+            continue
+        collector = collectors.get(effective_collector_id(c, list(collectors.values()))) or {}
+        from ..mail import pool_mail
+
+        subject, text, html = pool_mail("pool_reminder", c, collector, base_url_for(request))
+        sent.append(request.app.state.mailer.send("pool_reminder", email, subject, text, html))
     return {"sent": len(sent), "mails": sent}

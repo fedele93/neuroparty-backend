@@ -15,7 +15,7 @@ from .db import ensure_schema, make_engine, make_session_factory
 from .mail import Mailer
 from .mistral import FakeMistralClient, MistralClient
 from .push import PushService
-from .routers import assistant, automation, bus, event, export, gifts, guests, mail, notifications, photos, profile, push, wishes
+from .routers import assistant, automation, bus, event, export, gifts, graduate, guests, mail, notifications, photos, profile, push, wishes
 from .scheduler import run_scheduler
 from .seed import load_event_file, seed_database
 from .validation import placeholder_gift_issues
@@ -107,10 +107,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant, profile, mail):
+    for r in (event, guests, bus, wishes, photos, gifts, notifications, push, export, automation, assistant, profile, mail, graduate):
         app.include_router(r.router)
     app.include_router(assistant.admin)
     app.include_router(mail.reminders)
+    app.include_router(mail.pool_reminders)
 
     # Foto caricate dagli invitati
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")

@@ -148,6 +148,7 @@ class PoolContributionIn(BaseModel):
     collectorId: str = Field(default="", max_length=64)  # vuoto = primo cassiere
     donorName: str = Field(min_length=1, max_length=200)
     contact: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=200)  # facoltativa: conferma e promemoria al donatore
     paymentMethod: PoolPaymentMethod = "IBAN"
     splitMode: PoolSplitMode = "EQUAL"
     totalAmount: float | None = Field(default=None, gt=0, le=100000)
@@ -155,17 +156,30 @@ class PoolContributionIn(BaseModel):
     allocations: list[PoolAllocationIn] = Field(default_factory=list, max_length=100)
     note: str = Field(default="", max_length=1000)
 
-    @field_validator("donorName", "contact", "note")
+    @field_validator("donorName", "contact", "note", "email")
     @classmethod
     def strip(cls, v: str, info) -> str:
         v = _clean(v)
         if info.field_name == "donorName" and not v:
             raise ValueError("Il nome è obbligatorio: serve al cassiere per riconoscere il versamento")
+        if info.field_name == "email":
+            v = v.lower()
+            if v and ("@" not in v or " " in v):
+                raise ValueError("Indirizzo email non valido")
         return v
 
 
 class PoolStatusIn(BaseModel):
     status: PoolStatus
+
+
+class PoolBatchStatusIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+    status: PoolStatus
+
+
+class PoolNoteIn(BaseModel):
+    treasurerNote: str = Field(default="", max_length=1000)
 
 
 class NotificationIn(BaseModel):

@@ -1,0 +1,275 @@
+{
+ "name": "NeuroParty - CSV settimanale ai cassieri",
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "0 9 * * 1"
+      }
+     ]
+    }
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000001",
+   "name": "Ogni lunedì alle 9",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "a1",
+       "name": "baseUrl",
+       "value": "https://neurospec.peukeia.eu",
+       "type": "string"
+      },
+      {
+       "id": "a2",
+       "name": "automationToken",
+       "value": "INCOLLA-QUI-AUTOMATION_TOKEN",
+       "type": "string"
+      },
+      {
+       "id": "a3",
+       "name": "cassieri",
+       "value": "[{\"id\":\"roberto\",\"nome\":\"Dott. Paolo Roberto\",\"email\":\"paolo@example.org\"},{\"id\":\"aki\",\"nome\":\"Dott. Aki\",\"email\":\"aki@example.org\"}]",
+       "type": "string"
+      },
+      {
+       "id": "a4",
+       "name": "giorniPromemoria",
+       "value": "7",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000002",
+   "name": "Impostazioni",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "notes": "cassieri: JSON con id (come in giftCollectors), nome ed email di ogni cassiere. giorniPromemoria: dopo quanti giorni in attesa scrivere al donatore (vuoto = nessun promemoria)."
+  },
+  {
+   "parameters": {
+    "jsCode": "const s = $input.first().json;\nreturn JSON.parse(s.cassieri).map(c => ({ json: { ...c, baseUrl: s.baseUrl, automationToken: s.automationToken, giorniPromemoria: s.giorniPromemoria } }));"
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000003",
+   "name": "Un elemento per cassiere",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "url": "={{ $json.baseUrl }}/api/export/gift-pool.csv",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "collector",
+       "value": "={{ $json.id }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "X-Automation-Token",
+       "value": "={{ $json.automationToken }}"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "file",
+       "outputPropertyName": "csv"
+      }
+     }
+    }
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000004",
+   "name": "Scarica CSV del cassiere",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "fromEmail": "neuroparty@example.org",
+    "toEmail": "={{ $('Un elemento per cassiere').item.json.email }}",
+    "subject": "=NeuroParty - quote uniche di {{ $('Un elemento per cassiere').item.json.nome }} al {{ $now.setZone('Europe/Rome').toFormat('dd/MM/yyyy') }}",
+    "emailFormat": "text",
+    "text": "=Ciao,\nin allegato il riepilogo aggiornato delle quote uniche versate a te (quote-uniche.csv, si apre con Excel).\nNell'app, con il tuo token in Impostazioni, trovi lo stesso elenco con i pulsanti per segnare le quote ricevute.\n\nApp della festa: {{ $('Un elemento per cassiere').item.json.baseUrl }}",
+    "options": {
+     "attachments": "csv"
+    }
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000005",
+   "name": "Invia CSV al cassiere",
+   "type": "n8n-nodes-base.emailSend",
+   "typeVersion": 2.1,
+   "position": [
+    880,
+    0
+   ],
+   "notes": "Seleziona (o crea) le credenziali SMTP del tuo provider di posta."
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose"
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $('Impostazioni').item.json.giorniPromemoria }}",
+       "rightValue": "",
+       "operator": {
+        "type": "string",
+        "operation": "notEmpty",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000006",
+   "name": "Promemoria attivi?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    440,
+    220
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $('Impostazioni').item.json.baseUrl }}/api/mail/reminders/pool",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "days",
+       "value": "={{ $('Impostazioni').item.json.giorniPromemoria }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "X-Automation-Token",
+       "value": "={{ $('Impostazioni').item.json.automationToken }}"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "5f1a2b3c-0003-4000-8000-000000000007",
+   "name": "Promemoria ai donatori in attesa",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    220
+   ],
+   "notes": "Il backend scrive (evento mail.send) a chi ha registrato una quota con email e non risulta ancora ricevuta da almeno giorniPromemoria giorni."
+  }
+ ],
+ "connections": {
+  "Ogni lunedì alle 9": {
+   "main": [
+    [
+     {
+      "node": "Impostazioni",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Impostazioni": {
+   "main": [
+    [
+     {
+      "node": "Un elemento per cassiere",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Promemoria attivi?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Un elemento per cassiere": {
+   "main": [
+    [
+     {
+      "node": "Scarica CSV del cassiere",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Scarica CSV del cassiere": {
+   "main": [
+    [
+     {
+      "node": "Invia CSV al cassiere",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Promemoria attivi?": {
+   "main": [
+    [
+     {
+      "node": "Promemoria ai donatori in attesa",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1",
+  "timezone": "Europe/Rome"
+ },
+ "active": false
+}

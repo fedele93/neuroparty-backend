@@ -32,7 +32,11 @@ def make_session_factory(engine):
 # quindi su un database già in uso le aggiungiamo con ALTER TABLE (SQLite lo supporta).
 ADDED_COLUMNS = {
     "event_notifications": {"scheduled_at": "INTEGER"},
-    "gift_pool_contributions": {"collector_id": "VARCHAR(64) NOT NULL DEFAULT ''", "collector_name": "VARCHAR(200) NOT NULL DEFAULT ''"},
+    "gift_pool_contributions": {
+        "collector_id": "VARCHAR(64) NOT NULL DEFAULT ''", "collector_name": "VARCHAR(200) NOT NULL DEFAULT ''",
+        "email": "VARCHAR(200) NOT NULL DEFAULT ''", "treasurer_note": "TEXT NOT NULL DEFAULT ''",
+    },
+    "gift_targets": {"email": "VARCHAR(200) NOT NULL DEFAULT ''"},
     "bus_bookings": {
         "guest_id": "INTEGER", "status": "VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED'", "code": "VARCHAR(16) NOT NULL DEFAULT ''",
         "checked_in_at": "INTEGER",

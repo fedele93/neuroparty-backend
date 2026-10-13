@@ -200,12 +200,20 @@ class GiftTarget(Base):
     iban_holder: Mapped[str] = mapped_column(String(200), default="")
     satispay_url: Mapped[str] = mapped_column(String(300), default="")
     paypal_me_url: Mapped[str] = mapped_column(String(300), default="")
+    email: Mapped[str] = mapped_column(String(200), default="")  # privata: avvisi al festeggiato (auguri ricevuti)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    @property
+    def short_name(self) -> str:
+        import re
+
+        return re.sub(r"^Dott\.(ssa)?\s*", "", self.name, flags=re.IGNORECASE)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "specialization": self.specialization,
             "roleTitle": self.role_title,
             "giftTitle": self.gift_title,
@@ -230,6 +238,8 @@ class GiftPoolContribution(Base):
     collector_name: Mapped[str] = mapped_column(String(200), default="")
     donor_name: Mapped[str] = mapped_column(String(200))
     contact: Mapped[str] = mapped_column(String(200), default="")
+    email: Mapped[str] = mapped_column(String(200), default="")  # per conferma e promemoria al donatore
+    treasurer_note: Mapped[str] = mapped_column(Text, default="")  # appunti del cassiere
     payment_method: Mapped[str] = mapped_column(String(20), default="IBAN")  # IBAN | PayPal | Contanti
     split_mode: Mapped[str] = mapped_column(String(10), default="EQUAL")  # EQUAL | CUSTOM
     total_amount: Mapped[float] = mapped_column(Float)
@@ -253,6 +263,8 @@ class GiftPoolContribution(Base):
             "collectorName": self.collector_name,
             "donorName": self.donor_name,
             "contact": self.contact,
+            "email": self.email,
+            "treasurerNote": self.treasurer_note,
             "paymentMethod": self.payment_method,
             "splitMode": self.split_mode,
             "totalAmount": self.total_amount,

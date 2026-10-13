@@ -1,6 +1,6 @@
 # Workflow n8n di esempio
 
-Due workflow pronti da importare nel tuo n8n self-hosted (menu **⋯ → Import from File**).
+Tre workflow pronti da importare nel tuo n8n self-hosted (menu **⋯ → Import from File**).
 Dopo l'import vanno solo compilati i valori segnati come segnaposto e scelte le credenziali
 SMTP (o il canale che preferisci: Telegram, Signal, Google Sheets...).
 
@@ -63,6 +63,28 @@ Sicurezza consigliata: genera un segreto (`openssl rand -hex 24`), mettilo in
 credenziale con nome `X-Automation-Secret` e quel valore. Le chiamate senza il segreto giusto
 vengono rifiutate da n8n. Il backend invia anche `X-NeuroParty-Signature: sha256=<HMAC>` del
 corpo, se vuoi verificare la firma in un nodo Code.
+
+## 3. `csv-cassieri-settimanale.json` — il CSV delle quote a ogni cassiere, ogni settimana
+
+`Schedule Trigger → Impostazioni → Code → HTTP Request (CSV) → Send Email`, più un ramo
+`IF → HTTP Request (promemoria)`.
+
+Ogni lunedì alle 9 scarica `GET /api/export/gift-pool.csv?collector=<id>` per ogni cassiere e
+glielo manda in allegato (`quote-uniche.csv`, si apre con Excel). Nello stesso giro chiama
+`POST /api/mail/reminders/pool?days=N`: il backend scrive (evento `mail.send`, quindi dal
+workflow 2) ai donatori che hanno lasciato l'email e la cui quota risulta ancora in attesa da
+almeno N giorni, ricordando IBAN e causale del cassiere.
+
+Da compilare nel nodo **Impostazioni**:
+
+| Campo | Valore |
+|---|---|
+| `baseUrl`, `automationToken` | come nel workflow 1 |
+| `cassieri` | JSON con `id` (lo stesso di `giftCollectors` nel file evento), `nome` ed `email` di ogni cassiere |
+| `giorniPromemoria` | giorni di attesa prima del promemoria al donatore; vuoto = nessun promemoria |
+
+I cassieri possono anche mandare il promemoria a mano dalla PWA (cruscotto Regali, pulsante
+"Promemoria ai donatori in attesa"): vale solo per le proprie quote.
 
 ## Formato degli eventi
 

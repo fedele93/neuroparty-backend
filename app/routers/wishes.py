@@ -31,7 +31,24 @@ def create_wish(body: WishIn, request: Request, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(wish)
     request.app.state.webhooks.emit("wish.created", {"wish": wish.to_dict()})
+    notify_graduate(request, db, wish)
     return wish.to_dict()
+
+
+def notify_graduate(request: Request, db: Session, wish: Wish) -> None:
+    """Email al festeggiato destinatario dell'augurio (se ha un'email privata in giftTargets)."""
+    from ..deps import base_url_for
+    from ..mail import wish_received_mail
+    from ..models import GiftTarget
+
+    target_name = (wish.target_graduate or "").strip().lower()
+    if not target_name or target_name.startswith("tutti"):
+        return
+    for t in db.scalars(select(GiftTarget)).all():
+        if t.email and t.short_name.lower() == target_name:
+            subject, text, html = wish_received_mail(t, wish, base_url_for(request))
+            request.app.state.mailer.send("wish_received", t.email, subject, text, html)
+            return
 
 
 @router.post("/{wish_id}/heart")

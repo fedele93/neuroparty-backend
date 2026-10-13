@@ -21,7 +21,7 @@ from ..models import (
     GiftTarget,
     now_ms,
 )
-from ..schemas import PoolContributionIn, PoolStatusIn
+from ..schemas import PoolBatchStatusIn, PoolContributionIn, PoolNoteIn, PoolStatusIn
 from ..seed import gift_collector_info, gift_collectors_info
 from ..state import bump_version
 
@@ -218,6 +218,7 @@ def add_pool_contribution(
         collector_name=collector["name"],
         donor_name=body.donorName,
         contact=body.contact,
+        email=body.email,
         payment_method=body.paymentMethod,
         split_mode=body.splitMode,
         total_amount=total,
@@ -234,6 +235,12 @@ def add_pool_contribution(
     request.app.state.webhooks.emit(
         "gift.pooled", {"contribution": result, "summary": pool_board(_all_pool(db), targets, collectors, None)["summary"]}
     )
+    if contribution.email:
+        from ..deps import base_url_for
+        from ..mail import pool_mail
+
+        subject, text, html = pool_mail("pool_confirmation", contribution, collector, base_url_for(request))
+        result["mail"] = request.app.state.mailer.send("pool_confirmation", contribution.email, subject, text, html)
     return result
 
 
@@ -306,3 +313,43 @@ def set_pool_status(
         db.commit()
         db.refresh(c)
     return c.to_dict()
+
+
+@router.patch("/pool/{contribution_id}")
+def set_pool_note(
+    contribution_id: int, body: PoolNoteIn, request: Request,
+    db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer),
+):
+    """Appunti del cassiere su una quota (es. "bonifico visto il 3/11")."""
+    c = db.get(GiftPoolContribution, contribution_id)
+    if c is None:
+        raise HTTPException(404, "Quota non trovata")
+    if not in_scope(c, scope, collectors_of(request)):
+        raise HTTPException(403, "Questa quota è stata versata a un altro cassiere")
+    c.treasurer_note = body.treasurerNote.strip()
+    db.commit()
+    db.refresh(c)
+    return c.to_dict()
+
+
+@router.post("/pool/status")
+def set_pool_status_batch(
+    body: PoolBatchStatusIn, request: Request,
+    db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer),
+):
+    """Segna più quote in una volta (ricevute o di nuovo in attesa); le quote di altri cassieri vengono saltate."""
+    collectors = collectors_of(request)
+    updated, skipped = [], []
+    for cid in body.ids:
+        c = db.get(GiftPoolContribution, cid)
+        if c is None or not in_scope(c, scope, collectors):
+            skipped.append(cid)
+            continue
+        if c.status != body.status:
+            c.status = body.status
+            c.received_at = now_ms() if body.status == POOL_STATUS_RECEIVED else None
+        updated.append(c.to_dict())
+    if updated:
+        bump_version(db)
+        db.commit()
+    return {"updated": len(updated), "skipped": skipped}

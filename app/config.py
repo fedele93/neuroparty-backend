@@ -27,6 +27,11 @@ class Settings:
     treasurer_tokens: dict = field(default_factory=lambda: {
         k[len("TREASURER_TOKEN_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("TREASURER_TOKEN_") and v.strip()
     })
+    # Token per singolo festeggiato: GRADUATE_TOKEN_<ID> (id del regalo in maiuscolo, es. GRADUATE_TOKEN_LUISI):
+    # area festeggiato (chi viene, auguri ricevuti, proprie coordinate) e configurazione del proprio avatar.
+    graduate_tokens: dict = field(default_factory=lambda: {
+        k[len("GRADUATE_TOKEN_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("GRADUATE_TOKEN_") and v.strip()
+    })
     # Se true, al riavvio aggiorna anche testi/IBAN/link dei regali già in DB a partire dal JSON.
     # Di default aggiunge solo i regali mancanti.
     gift_sync_update_texts: bool = field(default_factory=lambda: _bool(os.environ.get("GIFT_SYNC_UPDATE_TEXTS"), False))

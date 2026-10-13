@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..assistant import SECTIONS, clean_history, run_turn
-from ..auth import get_client_id, require_admin
+from ..auth import get_client_id, graduate_scope
 from ..deps import get_db
 from ..mistral import MistralError
 from ..models import AssistantAvatar, now_ms
@@ -177,24 +177,37 @@ class PreviewIn(BaseModel):
     text: str = Field(default="", max_length=400)
 
 
-admin = APIRouter(prefix="/api/assistant/admin", tags=["assistente"], dependencies=[Depends(require_admin)])
+def avatar_scope(scope: set[str] | None | bool = Depends(graduate_scope)) -> set[str] | None:
+    """Organizzatori: tutti gli avatar. Festeggiato (X-Graduate-Token): solo il proprio."""
+    if scope is False:
+        raise HTTPException(403, "Token organizzatore o festeggiato non valido")
+    return scope
+
+
+def _get_avatar_in_scope(db: Session, avatar_id: str, scope: set[str] | None) -> AssistantAvatar:
+    if scope is not None and avatar_id not in scope:
+        raise HTTPException(403, "Puoi configurare solo il tuo avatar")
+    return _get_avatar(db, avatar_id)
+
+
+admin = APIRouter(prefix="/api/assistant/admin", tags=["assistente"])
 
 
 @admin.get("/avatars")
-def admin_avatars(request: Request, db: Session = Depends(get_db)):
+def admin_avatars(request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
     svc = _svc(request)
     fb = svc.voices.fallback_available
     return {
         "configured": svc.client.enabled,
         "fake": svc.client.fake,
         "fallbackVoiceId": svc.voices.fallback() if svc.client.enabled else None,
-        "avatars": [a.to_admin(fb) for a in _avatars(db)],
+        "avatars": [a.to_admin(fb) for a in _avatars(db) if scope is None or a.id in scope],
     }
 
 
 @admin.put("/avatars/{avatar_id}")
-def admin_update_avatar(avatar_id: str, body: AvatarUpdate, request: Request, db: Session = Depends(get_db)):
-    a = _get_avatar(db, avatar_id)
+def admin_update_avatar(avatar_id: str, body: AvatarUpdate, request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
+    a = _get_avatar_in_scope(db, avatar_id, scope)
     if body.persona is not None:
         a.persona = body.persona.strip()
     if body.enabled is not None:
@@ -209,12 +222,12 @@ def admin_update_avatar(avatar_id: str, body: AvatarUpdate, request: Request, db
 
 
 @admin.post("/avatars/{avatar_id}/sample", status_code=201)
-async def admin_upload_sample(avatar_id: str, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def admin_upload_sample(avatar_id: str, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
     """Salva il campione (pochi secondi di voce pulita) e crea la voce clonata su Mistral."""
     svc = _svc(request)
     if not svc.client.enabled:
         raise HTTPException(503, "MISTRAL_API_KEY non configurata sul server")
-    a = _get_avatar(db, avatar_id)
+    a = _get_avatar_in_scope(db, avatar_id, scope)
     data = await file.read()
     if len(data) < 1000:
         raise HTTPException(422, "Campione troppo corto o vuoto")
@@ -251,8 +264,8 @@ async def admin_upload_sample(avatar_id: str, request: Request, file: UploadFile
 
 
 @admin.get("/avatars/{avatar_id}/sample")
-def admin_get_sample(avatar_id: str, request: Request, db: Session = Depends(get_db)):
-    a = _get_avatar(db, avatar_id)
+def admin_get_sample(avatar_id: str, request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
+    a = _get_avatar_in_scope(db, avatar_id, scope)
     path = os.path.join(request.app.state.settings.voices_dir, a.sample_filename) if a.sample_filename else ""
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "Nessun campione caricato")
@@ -260,9 +273,9 @@ def admin_get_sample(avatar_id: str, request: Request, db: Session = Depends(get
 
 
 @admin.delete("/avatars/{avatar_id}/sample", status_code=204)
-def admin_delete_sample(avatar_id: str, request: Request, db: Session = Depends(get_db)):
+def admin_delete_sample(avatar_id: str, request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
     svc = _svc(request)
-    a = _get_avatar(db, avatar_id)
+    a = _get_avatar_in_scope(db, avatar_id, scope)
     if a.voice_id:
         try:
             svc.client.delete_voice(a.voice_id)
@@ -283,11 +296,11 @@ def admin_delete_sample(avatar_id: str, request: Request, db: Session = Depends(
 
 
 @admin.post("/avatars/{avatar_id}/preview")
-def admin_preview(avatar_id: str, body: PreviewIn, request: Request, db: Session = Depends(get_db)):
+def admin_preview(avatar_id: str, body: PreviewIn, request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(avatar_scope)):
     svc = _svc(request)
     if not svc.client.enabled:
         raise HTTPException(503, "MISTRAL_API_KEY non configurata sul server")
-    a = _get_avatar(db, avatar_id)
+    a = _get_avatar_in_scope(db, avatar_id, scope)
     voice = svc.voices.voice_for(a)
     if not voice:
         raise HTTPException(409, "Nessuna voce disponibile per questo avatar: carica un campione o scegli una voce preimpostata")
@@ -301,7 +314,7 @@ def admin_preview(avatar_id: str, body: PreviewIn, request: Request, db: Session
             "audio": base64.b64encode(audio).decode("ascii"), "audioMime": "audio/wav" if fmt == "wav" else "audio/mpeg"}
 
 
-@admin.get("/voices")
+@admin.get("/voices", dependencies=[Depends(avatar_scope)])
 def admin_voices(request: Request, refresh: bool = False):
     svc = _svc(request)
     if not svc.client.enabled:

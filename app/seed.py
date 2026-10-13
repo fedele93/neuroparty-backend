@@ -102,7 +102,7 @@ GIFT_TEXT_FIELDS = {
     "name": ("name", str), "specialization": ("specialization", str), "roleTitle": ("role_title", str),
     "giftTitle": ("gift_title", str), "giftDescription": ("gift_description", str),
     "iban": ("iban", str), "ibanHolder": ("iban_holder", str),
-    "satispayUrl": ("satispay_url", str), "paypalMeUrl": ("paypal_me_url", str),
+    "satispayUrl": ("satispay_url", str), "paypalMeUrl": ("paypal_me_url", str), "email": ("email", str),
 }
 
 
@@ -149,6 +149,7 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
                 iban_holder=t.get("ibanHolder", ""),
                 satispay_url=t.get("satispayUrl", ""),
                 paypal_me_url=t.get("paypalMeUrl", ""),
+                email=t.get("email", ""),
                 sort_order=i,
             )
         )

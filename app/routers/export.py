@@ -9,7 +9,7 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -80,13 +80,18 @@ def export_bus(db: Session = Depends(get_db)):
 
 
 @router.get("/gift-pool.csv")
-def export_gift_pool(request: Request, db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer_or_automation)):
+def export_gift_pool(request: Request, collector: str = "", db: Session = Depends(get_db), scope: set[str] | None = Depends(require_treasurer_or_automation)):
     """Quote uniche per i cassieri: una riga per versamento (con il cassiere), una colonna per
     neo-specialista e le righe dei totali per cassiere e complessivi (anche "già ricevuto"),
     così in Excel si legge subito quanto spetta a ognuno. Con TREASURER_TOKEN_<ID> solo le
-    quote di quel cassiere."""
+    quote di quel cassiere; `?collector=<id>` restringe a un cassiere (per n8n, che manda a
+    ogni cassiere il suo CSV)."""
     targets = db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc(), GiftTarget.id.asc())).all()
     collectors = collectors_of(request)
+    if collector:
+        if scope is not None and collector not in scope:
+            raise HTTPException(403, "Questo cassiere non è nel tuo ambito")
+        scope = {collector}
     rows = sorted(pool_rows_for(db, scope, collectors), key=lambda c: c.created_at or 0)
     names_c = {c["id"]: c["name"] for c in collectors}
     columns = [t.id for t in targets]

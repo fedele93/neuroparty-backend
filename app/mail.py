@@ -34,6 +34,9 @@ KINDS = {
     "bus_promoted": "Navetta: posto confermato",
     "bus_cancelled": "Navetta: prenotazione annullata",
     "bus_reminder": "Promemoria navetta",
+    "pool_confirmation": "Quota unica registrata",
+    "pool_reminder": "Promemoria quota unica",
+    "wish_received": "Nuovo augurio per te",
     "test": "Email di prova",
 }
 
@@ -226,6 +229,45 @@ def bus_mail(kind: str, guest: Guest, booking, request) -> tuple[str, str, str, 
         if ics:
             attachments.append({"filename": "navetta.ics", "contentType": "text/calendar", "contentBase64": base64.b64encode(ics.encode("utf-8")).decode("ascii")})
     return subject, text, _layout(title, body, "Email automatica dall'app della festa: per cambiare qualcosa usa il tuo profilo."), attachments
+
+
+def pool_mail(kind: str, contribution, collector: dict, app_url: str) -> tuple[str, str, str]:
+    """Al donatore: conferma della quota unica registrata (con IBAN/causale del cassiere) o promemoria se ancora in attesa."""
+    e = html_lib.escape
+    amount = f"{contribution.total_amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+    reason = f"{collector.get('transferReason') or 'Regalo specializzazione'} - {contribution.donor_name}"
+    parts = ", ".join(f"{a.graduate_name} {a.amount:.2f} €".replace(".", ",") for a in contribution.allocations)
+    how = {
+        "IBAN": f"Bonifico a {collector.get('ibanHolder') or collector.get('name')}, IBAN {collector.get('iban')}, causale: {reason}",
+        "PayPal": f"PayPal: {collector.get('paypalMeUrl')} (indica il tuo nome nel messaggio)",
+        "Contanti": f"Consegna i contanti a {collector.get('name')} (in reparto o alla festa)",
+    }.get(contribution.payment_method, "")
+    if kind == "pool_reminder":
+        subject = f"Promemoria: la tua quota unica di {amount} risulta ancora in attesa"
+        intro = f"la quota unica di {amount} che hai registrato per i neo-specialisti risulta ancora in attesa da parte di {collector.get('name')}."
+        title = "Quota in attesa"
+    else:
+        subject = f"Quota unica registrata: {amount} a {collector.get('name')}"
+        intro = f"abbiamo registrato la tua quota unica di {amount} a {collector.get('name')}, che la ripartirà fra i neo-specialisti."
+        title = "Quota unica registrata"
+    text = (f"Ciao {first_name(contribution.donor_name)},\n\n{intro}\n\nCome versarla ({contribution.payment_method}):\n{how}\n\n"
+            f"Ripartizione: {parts}\n\nSe hai già versato, non devi fare altro: il cassiere la segnerà come ricevuta.\nApp della festa: {app_url}")
+    body = (f"<p>Ciao {e(first_name(contribution.donor_name))},</p><p>{e(intro)}</p>"
+            f"<p><b>Come versarla ({e(contribution.payment_method)}):</b><br>{e(how)}</p><p><b>Ripartizione:</b> {e(parts)}</p>"
+            f"<p>Se hai già versato, non devi fare altro: il cassiere la segnerà come ricevuta.</p>" + _button(app_url, "Apri l'app della festa"))
+    return subject, text, _layout(title, body, "Email automatica dall'app della festa.")
+
+
+def wish_received_mail(target, wish, app_url: str) -> tuple[str, str, str]:
+    """Al festeggiato: è arrivato un augurio per lui."""
+    e = html_lib.escape
+    subject = f"Nuovo augurio da {wish.author_name}"
+    text = (f"Ciao {first_name(target.name)},\n\n{wish.author_name} ti ha scritto in bacheca:\n\n\u201c{wish.message}\u201d\n\n"
+            f"Leggi tutti gli auguri nell'app: {app_url}")
+    body = (f"<p>Ciao {e(first_name(target.name))},</p><p><b>{e(wish.author_name)}</b> ti ha scritto in bacheca:</p>"
+            f"<blockquote style=\"border-left:3px solid #C9A227;margin:0;padding:6px 12px;color:#0F1B2D;\">{e(wish.message)}</blockquote>"
+            + _button(app_url, "Leggi gli auguri"))
+    return subject, text, _layout("Nuovo augurio per te", body, "Ricevi questa email perché sei uno dei festeggiati.")
 
 
 def test_mail(event_data: dict) -> tuple[str, str, str]:
