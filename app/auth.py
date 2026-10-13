@@ -191,3 +191,22 @@ def can_see_lists(request: Request) -> bool:
 def require_lists(request: Request) -> None:
     if not lists_allowed(request):
         raise HTTPException(status_code=403, detail="Elenco riservato a organizzatori, festeggiati e cassieri")
+
+
+def roles_for(request: Request) -> dict:
+    """Quali ruoli attivano i token inviati in questa chiamata: la PWA lo usa per mostrare la guida
+    del ruolo appena sbloccato e per segnalare subito un token sbagliato.
+    - admin: ADMIN_TOKEN valido;
+    - treasurer / treasurerIds: cassiere valido; la lista degli id è vuota con TREASURER_TOKEN (tutti);
+    - graduate: id del festeggiato (GRADUATE_TOKEN_<ID>) oppure None."""
+    settings = request.app.state.settings
+    h = request.headers
+    scope = treasurer_scope(request, None, h.get("x-treasurer-token"))
+    gt = h.get("x-graduate-token")
+    graduate = next((gid for gid, t in settings.graduate_tokens.items() if _matches(gt, t)), None) if gt else None
+    return {
+        "admin": _matches(h.get("x-admin-token"), settings.admin_token),
+        "treasurer": scope is not False,
+        "treasurerIds": sorted(scope) if isinstance(scope, set) else [],
+        "graduate": graduate,
+    }

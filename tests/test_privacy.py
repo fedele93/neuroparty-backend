@@ -75,3 +75,18 @@ def test_admin_can_delete_photos_wishes_and_clear_history(tmp_path):
         assert r.status_code == 200 and r.json()["deleted"] >= 1
         assert c.get("/api/notifications").json() == []
         assert len(c.get("/api/notifications/scheduled", headers=ADMIN).json()) == 1
+
+
+def test_state_reports_roles_unlocked_by_tokens(tmp_path):
+    with make_client(tmp_path, treasurer_tokens={"aki": "cassa-aki"}, graduate_tokens={"luisi": "grad-luisi"}) as c:
+        none = {"admin": False, "treasurer": False, "treasurerIds": [], "graduate": None}
+        assert c.get("/api/state").json()["roles"] == none
+        assert c.get("/api/state", headers=ADMIN).json()["roles"] == {**none, "admin": True}
+        assert c.get("/api/state", headers=TREASURER).json()["roles"] == {**none, "treasurer": True}
+        assert c.get("/api/state", headers={"X-Treasurer-Token": "cassa-aki"}).json()["roles"] == {**none, "treasurer": True, "treasurerIds": ["aki"]}
+        assert c.get("/api/state", headers={"X-Graduate-Token": "grad-luisi"}).json()["roles"] == {**none, "graduate": "luisi"}
+        # token sbagliati: nessun ruolo (e il token festeggiato sbagliato non toglie quello organizzatore qui)
+        bad = {"X-Admin-Token": "no", "X-Treasurer-Token": "no", "X-Graduate-Token": "no"}
+        assert c.get("/api/state", headers=bad).json()["roles"] == none
+        both = {**ADMIN, "X-Graduate-Token": "grad-luisi"}
+        assert c.get("/api/state", headers=both).json()["roles"] == {**none, "admin": True, "graduate": "luisi"}

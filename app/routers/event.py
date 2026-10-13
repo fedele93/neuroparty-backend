@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import lists_allowed
+from ..auth import lists_allowed, roles_for
 from ..deps import base_url_for, get_db
 from ..models import (
     BusBooking,
@@ -55,6 +55,8 @@ def state(request: Request, db: Session = Depends(get_db)):
         "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.treasurer_tokens),
         # con i token inviati in questa chiamata, il client vede gli elenchi completi di invitati e navetta?
         "canSeeLists": lists_allowed(request),
+        # ruoli sbloccati dai token di questa chiamata (guida del ruolo nella PWA, token sbagliati)
+        "roles": roles_for(request),
         "pushSubscriptions": subscription_count(db),
     }
 
