@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..auth import can_modify, get_client_id, is_admin, require_admin
 from ..deps import get_db
 from ..models import Guest, now_ms
-from ..schemas import GuestIn, GuestUpdate
+from ..schemas import GuestIn, GuestUpdate, ImportIn
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/guests", tags=["invitati"])
@@ -198,3 +198,75 @@ def guest_invite(guest_id: int, request: Request, db: Session = Depends(get_db))
         raise HTTPException(422, "L'invitato non ha un'email: copia il link e mandaglielo tu")
     mail = send_access_link(request, db, guest)
     return {"guestId": guest.id, "link": profile_link(request, ensure_token(guest)), "mail": mail}
+
+
+@router.post("/import", dependencies=[Depends(require_admin)])
+def import_guests(body: ImportIn, request: Request, db: Session = Depends(get_db)):
+    """Import della lista invitati (righe già spezzate dalla PWA a partire da un CSV o da un foglio).
+    Abbina per email, altrimenti per nome (senza distinguere maiuscole); aggiorna i campi indicati e crea
+    chi manca (in attesa). Con sendLinks manda il link personale a chi ha l'email; con dryRun solo l'anteprima."""
+    from .profile import find_by_email, send_access_link
+
+    guests = db.scalars(select(Guest)).all()
+    by_name = {g.full_name.strip().lower(): g for g in guests}
+    results, created, updated, unchanged, skipped = [], 0, 0, 0, 0
+    to_invite: list[Guest] = []
+    for row in body.rows:
+        if not row.fullName:
+            skipped += 1
+            results.append({"fullName": "", "action": "skipped", "reason": "nome mancante"})
+            continue
+        g = find_by_email(db, row.email) if row.email else None
+        if g is None:
+            g = by_name.get(row.fullName.lower())
+        changes = {}
+        if g is None:
+            action = "created"
+            g = Guest(full_name=row.fullName, category=row.category or "Invitato", rsvp_status=row.rsvpStatus or "PENDING",
+                      guests_count=row.guestsCount if row.guestsCount is not None else 1, email=row.email, phone=row.phone,
+                      contact_info=row.email or row.phone)
+            if not body.dryRun:
+                db.add(g)
+            by_name[row.fullName.lower()] = g
+            created += 1
+        else:
+            for attr, value in (("category", row.category), ("email", row.email), ("phone", row.phone)):
+                if value and getattr(g, attr) != value:
+                    changes[attr] = value
+            if row.guestsCount is not None and g.guests_count != row.guestsCount:
+                changes["guests_count"] = row.guestsCount
+            if row.rsvpStatus and g.rsvp_status != row.rsvpStatus:
+                changes["rsvp_status"] = row.rsvpStatus
+            if changes:
+                action = "updated"
+                updated += 1
+                if not body.dryRun:
+                    for attr, value in changes.items():
+                        setattr(g, attr, value)
+                    g.contact_info = g.email or g.phone or g.contact_info
+                    g.updated_at = now_ms()
+            else:
+                action = "unchanged"
+                unchanged += 1
+        results.append({"fullName": g.full_name, "email": g.email or row.email, "action": action,
+                        "changes": sorted(changes.keys()), "willInvite": bool(body.sendLinks and (g.email or row.email))})
+        if body.sendLinks and (g.email or row.email):
+            to_invite.append(g)
+    if body.dryRun:
+        return {"dryRun": True, "created": created, "updated": updated, "unchanged": unchanged, "skipped": skipped, "invited": 0, "rows": results}
+    if created or updated:
+        bump_version(db)
+    db.commit()
+    invited, failed = 0, 0
+    for g in to_invite:
+        db.refresh(g)
+        out = send_access_link(request, db, g)
+        if out and out.get("status") in ("QUEUED", "DELIVERED"):
+            invited += 1
+        else:
+            failed += 1
+    if created or updated:
+        request.app.state.webhooks.emit("guest.imported", {"created": created, "updated": updated, "invited": invited,
+                                                           "summary": guests_summary(db.scalars(select(Guest)).all())})
+    return {"dryRun": False, "created": created, "updated": updated, "unchanged": unchanged, "skipped": skipped,
+            "invited": invited, "inviteFailed": failed, "rows": results}
