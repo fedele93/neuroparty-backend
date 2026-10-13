@@ -184,7 +184,7 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         ics = base64.b64decode(mail["attachments"][0]["contentBase64"]).decode()
         assert "BEGIN:VEVENT" in ics and "DTSTART;VALUE=DATE:20261113" in ics and b["code"] in ics  # orario navetta da definire: tutto il giorno
         # una sola prenotazione per profilo: la seconda chiamata la aggiorna
-        r = c.put("/api/profile/bus", json={"seatsCount": 3, "pickupStop": "Policlinico di Bari (Piazzale Principale)"}, headers=G)
+        r = c.put("/api/profile/bus", json={"seatsCount": 3, "pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)"}, headers=G)
         assert r.json()["busBooking"]["seatsCount"] == 3 and r.json()["busBooking"]["id"] == b["id"]
         assert len([x for x in c.get("/api/bus/bookings", headers=ADMIN).json() if x["guestId"] == gatti_id]) == 1
 
