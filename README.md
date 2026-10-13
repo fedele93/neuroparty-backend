@@ -199,7 +199,7 @@ all'ora indicata da un controllo in background (ogni `SCHEDULER_INTERVAL_S` seco
 ### Inviare una notifica dal terminale
 
 ```bash
-./scripts/send-notification.sh "🚌 Partenza navetta" "Partiamo tra 15 minuti dal Piazzale" Navetta
+./scripts/send-notification.sh "🚌 Partenza navetta" "Partiamo tra 15 minuti da Piazza Giulio Cesare" Navetta
 ```
 
 ## Automazioni con n8n

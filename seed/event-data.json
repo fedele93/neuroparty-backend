@@ -29,17 +29,17 @@
     "timeline": [
       { "time": "{ceremonyTime|Ore $|Lun 9}", "title": "Seduta di Laurea & Proclamazione", "location": "Aula Magna \"G. De Benedictis\" - Policlinico di Bari", "details": "Discussione delle tesi e proclamazione dei 9 neo-specialisti in Neurologia. {ceremonyTime|Inizio alle ore $.|L'ora esatta della seduta sarà comunicata a breve.}", "more": true },
       { "time": "Dopo", "title": "Brindisi Accademico & Foto di Rito", "location": "Aula Magna \"G. De Benedictis\" - Policlinico di Bari", "details": "Consegna dei diplomi, corona d'alloro e foto di rito con colleghi, docenti e parenti al termine della seduta del 9 novembre.", "more": true },
-      { "time": "{busDepartureTime|Ven 13 ore $|Ven 13}", "title": "Ritrovo & Imbarco Autobus Navetta", "location": "Piazzale Policlinico di Bari", "details": "Venerdì 13 novembre: ritrovo dei partecipanti e transfer riservato 54 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). {busDepartureTime|Partenza alle ore $.|Orario di partenza da definire.}", "more": true },
+      { "time": "{busDepartureTime|Ven 13 ore $|Ven 13}", "title": "Ritrovo & Imbarco Autobus Navetta", "location": "Piazza Giulio Cesare (Policlinico di Bari)", "details": "Venerdì 13 novembre: ritrovo dei partecipanti e transfer riservato 54 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). {busDepartureTime|Partenza alle ore $.|Orario di partenza da definire.}", "more": true },
       { "time": "{partyTime|Ven 13 ore $|Ven 13}", "title": "Festa di Specializzazione", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Venerdì 13 novembre al Giardino dei Tempi (Via Giovanni Amendola 247, 70126 Bari): aperitivo, cena a buffet e brindisi tutti insieme per festeggiare i 9 neo-neurologi. {partyTime|Dalle ore $|L'orario sarà comunicato a breve}{partyEndTime| fino alle $|}.", "more": true },
       { "time": "Ven 13", "title": "Taglio della Torta & Dj Set", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Taglio della torta di specializzazione, video celebrativo a sorpresa, musica e balli per chiudere in bellezza la serata.", "more": false }
     ]
   },
   "busSchedule": {
-    "subtitle": "Transfer andata e ritorno dal Policlinico di Bari al Giardino dei Tempi",
-    "andata": { "timeLabel": "Ven 13 - {busDepartureTime|ore $|da definire}", "from": "Policlinico di Bari (Piazzale Principale)", "to": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "notes": "Venerdì 13 novembre: {busDepartureTime|partenza alle ore $ dal Piazzale Principale del Policlinico|orario di partenza in via di definizione, sarà confermato con l'orario della festa}" },
+    "subtitle": "Transfer andata e ritorno da Piazza Giulio Cesare (Policlinico di Bari) al Giardino dei Tempi",
+    "andata": { "timeLabel": "Ven 13 - {busDepartureTime|ore $|da definire}", "from": "Piazza Giulio Cesare (Policlinico di Bari)", "to": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "notes": "Venerdì 13 novembre: {busDepartureTime|partenza alle ore $ da Piazza Giulio Cesare (ingresso del Policlinico)|orario di partenza in via di definizione, sarà confermato con l'orario della festa}" },
     "ritorno": { "timeLabel": "Ven 13 - {busReturnTime|ore $|notte}", "from": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "to": "Policlinico di Bari / Stazione Centrale", "notes": "Rientro notturno garantito per tornare a casa in totale sicurezza" },
     "pickupStops": [
-      "Policlinico di Bari (Piazzale Principale)",
+      "Piazza Giulio Cesare (Policlinico di Bari)",
       "Policlinico di Bari (Fermata Metro/Navetta)",
       "Stazione Ferroviaria Centrale di Bari"
     ]
@@ -51,6 +51,7 @@
       "subtitle": "Discussione Tesi & Brindisi",
       "timeLabel": "9 Novembre - {ceremonyTime|ore $|ora da definire}",
       "address": "Aula Magna \"G. De Benedictis\", AOUC Policlinico di Bari, Piazza Giulio Cesare 11, Bari",
+      "mapsUrl": "https://maps.app.goo.gl/RhZKgXuxfYgg2RgTA",
       "latitude": 41.1173,
       "longitude": 16.8719,
       "iconType": "GRADUATION",
@@ -61,11 +62,12 @@
       "title": "Partenza Autobus Navetta",
       "subtitle": "Punto di Ritrovo Transfer Gratuito",
       "timeLabel": "Venerdì 13 - {busDepartureTime|partenza ore $|ritrovo da definire}",
-      "address": "Piazzale Policlinico di Bari (fronte ingresso principale)",
+      "address": "Piazza Giulio Cesare, Bari (davanti all'ingresso del Policlinico)",
+      "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Piazza+Giulio+Cesare,+Bari",
       "latitude": 41.1170,
       "longitude": 16.8715,
       "iconType": "BUS",
-      "description": "Navetta riservata 54 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). Orari e fermate di andata e ritorno saranno confermati prossimamente."
+      "description": "Ritrovo in Piazza Giulio Cesare, davanti all'ingresso del Policlinico. Navetta riservata 54 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). Orari di andata e ritorno saranno confermati prossimamente."
     },
     {
       "id": "festa",
@@ -89,8 +91,8 @@
     { "fullName": "Martina Ferri", "category": "Famigliari", "rsvpStatus": "CONFIRMED", "guestsCount": 2, "dietaryNotes": "Nessuna", "contactInfo": "329 5544332" }
   ],
   "busBookings": [
-    { "passengerName": "Dott.ssa Sofia Valenti", "seatsCount": 1, "pickupStop": "Policlinico di Bari (Piazzale Principale)", "returnTripWanted": true, "contactPhone": "333 4567891", "notes": "Pronta subito dopo le proclamazioni" },
-    { "passengerName": "Giulia Colombo & Gruppo Amici", "seatsCount": 3, "pickupStop": "Policlinico di Bari (Piazzale Principale)", "returnTripWanted": true, "contactPhone": "340 5566778", "notes": "Con festoni e regali" },
+    { "passengerName": "Dott.ssa Sofia Valenti", "seatsCount": 1, "pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)", "returnTripWanted": true, "contactPhone": "333 4567891", "notes": "Pronta subito dopo le proclamazioni" },
+    { "passengerName": "Giulia Colombo & Gruppo Amici", "seatsCount": 3, "pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)", "returnTripWanted": true, "contactPhone": "340 5566778", "notes": "Con festoni e regali" },
     { "passengerName": "Specializzandi Neurologia Turno A", "seatsCount": 6, "pickupStop": "Policlinico di Bari (Fermata Metro/Navetta)", "returnTripWanted": true, "contactPhone": "349 1122339", "notes": "Tutti insieme" }
   ],
   "wishes": [
@@ -128,7 +130,7 @@
     { "id": "aki", "name": "Dott. Akilesh Bhunjun", "roleTitle": "Cassiere delle quote uniche", "description": "In alternativa puoi versare la tua quota unica ad Akilesh, che la ripartisce allo stesso modo fra i neo-specialisti.", "iban": "IT00 B000 0000 0000 0000 0000 000", "ibanHolder": "Akilesh Bhunjun", "paypalMeUrl": "https://paypal.me/akileshbhunjun", "paymentMethods": ["IBAN", "PayPal", "Contanti"], "transferReason": "Regalo specializzazione Neurologia 2026" }
   ],
   "giftTargets": [
-    { "id": "luisi", "name": "Dott. Fedele Luisi", "specialization": "Epilessia & Neurofisiologia Clinica", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Stetoscopio Digitale Littmann & Fellowship Clinica", "giftDescription": "Contributo dedicato per lo strumento diagnostico avanzato e per l'inizio dell'attività ospedaliera di Fedele.", "iban": "IT13 U030 6941 5131 0000 0010 092", "ibanHolder": "Fedele Luisi", "satispayUrl": "https://tag.satispay.com/fedeleluisi", "paypalMeUrl": "https://www.paypal.com/qrcodes/p2pqrc/MBSHEM4F557R8" },
+    { "id": "luisi", "name": "Dott. Fedele Luisi", "specialization": "Epilessia & Neurofisiologia Clinica", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Stetoscopio Digitale Littmann & Fellowship Clinica", "giftDescription": "Contributo dedicato per lo strumento diagnostico avanzato e per l'inizio dell'attività ospedaliera di Fedele.", "iban": "IT13 U030 6941 5131 0000 0010 092", "ibanHolder": "Fedele Luisi", "satispayUrl": "https://web.satispay.com/download/qrcode/S6Y-CON--6F32BD93-1233-47D0-A362-4EB4C249ACE1?locale=it", "paypalMeUrl": "https://www.paypal.com/qrcodes/p2pqrc/MBSHEM4F557R8" },
     { "id": "carlone", "name": "Dott. Sebastiano Carlone", "specialization": "Cefalee e Malattie Neurodegenerative", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Oftalmoscopio Professionale & Borsa Medico in Cuoio", "giftDescription": "Regalo personalizzato per le visite ambulatoriali e il master in patologie neurodegenerative di Sebastiano.", "iban": "IT12 Y030 6909 6061 0000 4567 890", "ibanHolder": "Sebastiano Carlone", "satispayUrl": "https://tag.satispay.com/sebastianocarlone", "paypalMeUrl": "https://paypal.me/sebastianocarlone" },
     { "id": "prezioso", "name": "Dott. Roberto Spiridione Prezioso", "specialization": "Stroke Unit & Neuro-Vascolare", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Corso Neurosonologia Doppler & Attrezzatura Studio", "giftDescription": "Regalo dedicato per la certificazione in ecocolordoppler transcranico e dotazione clinica di Roberto.", "iban": "IT99 Z030 6909 6061 0000 3210 987", "ibanHolder": "Roberto Spiridione Prezioso", "satispayUrl": "https://tag.satispay.com/robertoprezioso", "paypalMeUrl": "https://paypal.me/robertoprezioso" },
     { "id": "totaro", "name": "Dott.ssa Dalila Totaro", "specialization": "Sclerosi Multipla & Immunologia Neurologica", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Martello Riflessi Digitale & Corso RM Funzionale", "giftDescription": "Contributo per la dotazione ambulatoriale e l'aggiornamento in neuroimaging funzionale di Dalila.", "iban": "IT55 A030 6909 6061 0000 1112 223", "ibanHolder": "Dalila Totaro", "satispayUrl": "https://tag.satispay.com/dalilatotaro", "paypalMeUrl": "https://paypal.me/dalilatotaro" },
@@ -136,7 +138,7 @@
     { "id": "parrulli", "name": "Dott. Lorenzo Parrulli", "specialization": "Movimenti Patologici & Malattia di Parkinson", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Corso Tourette & Dispositivo Wearable Monitoring", "giftDescription": "Regalo per la formazione sui disturbi del movimento e l'attività di ricerca clinica di Lorenzo.", "iban": "IT77 C030 6909 6061 0000 5556 667", "ibanHolder": "Lorenzo Parrulli", "satispayUrl": "https://tag.satispay.com/lorenzoparrulli", "paypalMeUrl": "https://paypal.me/lorenzoparrulli" },
     { "id": "cusmai", "name": "Dott. Francesco Cusmai", "specialization": "Neuroriabilitazione & Medicina Fisica", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Tappeto Rotante & Kit Valutazione Neurologica", "giftDescription": "Contributo per la dotazione di neuroriabilitazione e l'attività ambulatoriale di Francesco.", "iban": "IT88 D030 6909 6061 0000 7778 889", "ibanHolder": "Francesco Cusmai", "satispayUrl": "https://tag.satispay.com/francescocusmai", "paypalMeUrl": "https://paypal.me/francescocusmai" },
     { "id": "esposto", "name": "Dott.ssa Chiara Esposto", "specialization": "Disturbi Cognitivi & Demenze", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Tablet Clinico & Corso Neuropsicologia", "giftDescription": "Regalo per la valutazione neuropsicologica dei pazienti e l'aggiornamento sulle demenze di Chiara.", "iban": "IT33 E030 6909 6061 0000 9990 011", "ibanHolder": "Chiara Esposto", "satispayUrl": "https://tag.satispay.com/chiaraesposto", "paypalMeUrl": "https://paypal.me/chiaraesposto" },
-    { "id": "regina", "name": "Dott. Donato Regina", "specialization": "Neurologia d'Urgenza & Neuro-Oncologia", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Ecografo Palmare & Corso Neuro-Oncologia", "giftDescription": "Contributo per la dotazione diagnostica al letto del paziente e l'aggiornamento in neuro-oncologia di Donato.", "iban": "IT05 S054 2404 0100 0000 1066 123", "ibanHolder": "Donato Regina", "satispayUrl": "https://tag.satispay.com/donatoregina", "paypalMeUrl": "https://www.paypal.me/DonatoRegina" }
+    { "id": "regina", "name": "Dott. Donato Regina", "specialization": "Neurologia d'Urgenza & Neuro-Oncologia", "roleTitle": "Neo-Specialista in Neurologia", "giftTitle": "Ecografo Palmare & Corso Neuro-Oncologia", "giftDescription": "Contributo per la dotazione diagnostica al letto del paziente e l'aggiornamento in neuro-oncologia di Donato.", "iban": "IT05 S054 2404 0100 0000 1066 123", "ibanHolder": "Donato Regina", "satispayUrl": "", "paypalMeUrl": "https://www.paypal.me/DonatoRegina" }
   ],
   "giftPoolContributions": [
     { "donorName": "Zia Laura & Famiglia", "contact": "laura@example.org", "paymentMethod": "IBAN", "splitMode": "EQUAL", "allocations": [{ "graduateId": "luisi", "amount": 20.0 }, { "graduateId": "carlone", "amount": 20.0 }, { "graduateId": "prezioso", "amount": 20.0 }, { "graduateId": "totaro", "amount": 20.0 }, { "graduateId": "ruta", "amount": 20.0 }, { "graduateId": "parrulli", "amount": 20.0 }, { "graduateId": "cusmai", "amount": 20.0 }, { "graduateId": "esposto", "amount": 20.0 }, { "graduateId": "regina", "amount": 20.0 }], "note": "Con affetto a tutti i neurologi!", "status": "RECEIVED", "ageHours": 30 },
