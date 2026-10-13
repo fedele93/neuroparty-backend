@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .auth import lists_allowed
 from .mistral import MistralClient, MistralError
 from .models import AssistantAvatar, Guest
 from .routers import bus as bus_router
@@ -349,6 +350,8 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
             return bus_router.bus_summary(request, db)
         if name == "find_guest":
             found = _find_guests(db, args.get("name", ""))
+            if not lists_allowed(request):  # l'elenco è riservato: un invitato ritrova solo sé stesso
+                found = [g for g in found if (client_id and g.owner_client_id == client_id) or (guest and g.id == guest.id)]
             return {"guests": [_guest_dict(g) for g in found], "count": len(found)}
         if name == "set_rsvp":
             full_name = (args.get("fullName") or "").strip()

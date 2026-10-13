@@ -1,7 +1,7 @@
 """Fase 4: area festeggiato, strumenti dei cassieri (note, stato in blocco, promemoria), email al donatore e al festeggiato."""
 
 
-from conftest import ADMIN, make_client
+from conftest import ADMIN, TREASURER, make_client
 from test_automation import N8N_URL, FakeN8n
 
 ROBERTO = {"X-Treasurer-Token": "tok-roberto"}
@@ -47,7 +47,7 @@ def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
         assert r.status_code == 200 and r.json()["treasurerNote"] == "bonifico visto il 3/11"
         assert c.patch(f"/api/gifts/pool/{q['id']}", json={"treasurerNote": "x"}, headers=AKI).status_code == 403
         assert c.patch(f"/api/gifts/pool/{q['id']}", json={"treasurerNote": "x"}).status_code == 403
-        assert c.patch("/api/gifts/pool/9999", json={"treasurerNote": "x"}, headers=ADMIN).status_code == 404
+        assert c.patch("/api/gifts/pool/9999", json={"treasurerNote": "x"}, headers=TREASURER).status_code == 404
         mine = c.get("/api/gifts/pool/mine", headers={"X-Client-Id": "tel-anna"}).json()
         assert mine[0]["treasurerNote"] == "bonifico visto il 3/11"
 
@@ -55,11 +55,11 @@ def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
         ids = [q["id"], r2.json()["id"]]
         r = c.post("/api/gifts/pool/status", json={"ids": ids + [9999], "status": "RECEIVED"}, headers=ROBERTO)
         assert r.status_code == 200 and r.json() == {"updated": 1, "skipped": [r2.json()["id"], 9999]}
-        rows = {x["id"]: x for x in c.get("/api/gifts/pool", headers=ADMIN).json()["contributions"]}
+        rows = {x["id"]: x for x in c.get("/api/gifts/pool", headers=TREASURER).json()["contributions"]}
         assert rows[q["id"]]["status"] == "RECEIVED" and rows[q["id"]]["receivedAt"] and rows[r2.json()["id"]]["status"] == "PENDING"
-        r = c.post("/api/gifts/pool/status", json={"ids": ids, "status": "PENDING"}, headers=ADMIN)
+        r = c.post("/api/gifts/pool/status", json={"ids": ids, "status": "PENDING"}, headers=TREASURER)
         assert r.json() == {"updated": 2, "skipped": []}
-        assert c.post("/api/gifts/pool/status", json={"ids": ids, "status": "BOH"}, headers=ADMIN).status_code == 422
+        assert c.post("/api/gifts/pool/status", json={"ids": ids, "status": "BOH"}, headers=TREASURER).status_code == 422
 
         # promemoria: solo quote in attesa, con email, più vecchie di N giorni, nel proprio ambito
         assert c.post("/api/mail/reminders/pool", headers=AKI).json()["sent"] == 0  # Bruno non ha email
@@ -72,10 +72,10 @@ def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
         assert c.post("/api/mail/reminders/pool?days=0").status_code == 403
         # ricevuta -> niente più promemoria
         c.post("/api/gifts/pool/status", json={"ids": [q["id"]], "status": "RECEIVED"}, headers=ROBERTO)
-        assert c.post("/api/mail/reminders/pool?days=0", headers=ADMIN).json()["sent"] == 0
+        assert c.post("/api/mail/reminders/pool?days=0", headers=TREASURER).json()["sent"] == 0
         # il CSV: ?collector= restringe (n8n manda a ogni cassiere il suo), ma non oltre il proprio ambito
-        csv_all = c.get("/api/export/gift-pool.csv", headers=ADMIN).text
-        csv_aki = c.get("/api/export/gift-pool.csv?collector=aki", headers=ADMIN).text
+        csv_all = c.get("/api/export/gift-pool.csv", headers=TREASURER).text
+        csv_aki = c.get("/api/export/gift-pool.csv?collector=aki", headers=TREASURER).text
         assert "Anna Verdi" in csv_all and "Bruno" in csv_all and "Bruno" in csv_aki and "Anna Verdi" not in csv_aki
         assert c.get("/api/export/gift-pool.csv?collector=aki", headers=ROBERTO).status_code == 403
         assert "Anna Verdi" in c.get("/api/export/gift-pool.csv?collector=roberto", headers=ROBERTO).text

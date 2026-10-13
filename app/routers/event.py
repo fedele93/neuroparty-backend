@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import lists_allowed
 from ..deps import base_url_for, get_db
 from ..models import (
     BusBooking,
@@ -51,23 +52,35 @@ def state(request: Request, db: Session = Depends(get_db)):
         "version": get_version(db),
         "serverTime": now_ms(),
         "adminEnabled": bool(request.app.state.settings.admin_token),
-        "treasurerEnabled": bool(
-            request.app.state.settings.treasurer_token or request.app.state.settings.admin_token or request.app.state.settings.treasurer_tokens
-        ),
+        "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.treasurer_tokens),
+        # con i token inviati in questa chiamata, il client vede gli elenchi completi di invitati e navetta?
+        "canSeeLists": lists_allowed(request),
         "pushSubscriptions": subscription_count(db),
     }
 
 
 @router.get("/snapshot")
 def snapshot(request: Request, db: Session = Depends(get_db)):
-    """Tutte le collezioni pubbliche in una sola risposta: usato dall'app Android per sincronizzare Room."""
+    """Tutte le collezioni pubbliche in una sola risposta: usato dall'app Android per sincronizzare Room.
+    Invitati e prenotazioni: completi solo con un token (organizzatore, festeggiato, cassiere),
+    altrimenti solo i propri record (X-Client-Id o X-Guest-Token)."""
     base = base_url_for(request)
+    lists = lists_allowed(request)
+    client_id = request.headers.get("x-client-id") or None
+    token = (request.headers.get("x-guest-token") or "").strip()
+    me = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
+    guests = db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()
+    bookings = db.scalars(select(BusBooking).order_by(BusBooking.booked_at.desc())).all()
+    if not lists:
+        guests = [g for g in guests if (client_id and g.owner_client_id == client_id) or (me and g.id == me.id)]
+        bookings = [b for b in bookings if (client_id and b.owner_client_id == client_id) or (me and b.guest_id == me.id)]
     return {
         "version": get_version(db),
         "serverTime": now_ms(),
         "event": public_event_info(request.app.state.event_data),
-        "guests": [g.to_dict() for g in db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()],
-        "busBookings": [b.to_dict() for b in db.scalars(select(BusBooking).order_by(BusBooking.booked_at.desc())).all()],
+        "canSeeLists": lists,
+        "guests": [g.to_dict() for g in guests],
+        "busBookings": [b.to_dict() for b in bookings],
         "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()],
         "photos": [p.to_dict(base) for p in db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()],
         # niente importi né elenco delle quote: le quote uniche le vede solo il cassiere (GET /api/gifts/pool)

@@ -20,7 +20,7 @@ def make_client(
     seed_file=SEED,
     update_gift_texts=False,
     automation_token="",
-    treasurer_token="",
+    treasurer_token="cassa-test",  # i test che vogliono "nessun cassiere" passano treasurer_token=""
     treasurer_tokens=None,
     graduate_tokens=None,
     assistant_fake=False,

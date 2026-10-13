@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import can_modify, get_client_id, is_admin, require_admin
+from ..auth import can_modify, can_see_lists, get_client_id, is_admin, require_admin, require_lists
 from ..deps import get_db
 from ..models import Guest, now_ms
 from ..schemas import GuestIn, GuestUpdate, ImportIn
@@ -12,9 +12,16 @@ router = APIRouter(prefix="/api/guests", tags=["invitati"])
 
 
 @router.get("")
-def list_guests(db: Session = Depends(get_db), admin: bool = Depends(is_admin)):
-    """Lista invitati; con X-Admin-Token anche email, telefono e consenso."""
+def list_guests(
+    db: Session = Depends(get_db), admin: bool = Depends(is_admin), lists: bool = Depends(can_see_lists),
+    client_id: str | None = Depends(get_client_id), x_guest_token: str | None = Header(default=None),
+):
+    """Lista invitati: completa per organizzatori, festeggiati e cassieri (con X-Admin-Token anche
+    email, telefono e consenso); gli altri vedono solo i record creati da questo dispositivo o il proprio profilo."""
     rows = db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()
+    if not lists:
+        token = (x_guest_token or "").strip()
+        rows = [g for g in rows if (client_id and g.owner_client_id == client_id) or (token and g.access_token == token)]
     return [g.to_dict(private=admin) for g in rows]
 
 
@@ -74,7 +81,7 @@ def guests_summary(guests: list[Guest]) -> dict:
     }
 
 
-@router.get("/summary")
+@router.get("/summary", dependencies=[Depends(require_lists)])
 def summary(db: Session = Depends(get_db)):
     """Riepilogo coperti e menu speciali (per ristorante e organizzatori)."""
     return guests_summary(db.scalars(select(Guest)).all())

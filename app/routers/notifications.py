@@ -73,6 +73,18 @@ def send_notification(
     return notif.to_dict()
 
 
+@router.delete("", status_code=200, dependencies=[Depends(require_admin)])
+def clear_history(db: Session = Depends(get_db)):
+    """Svuota la cronologia delle notifiche già pubblicate (quelle programmate restano)."""
+    rows = db.scalars(select(EventNotification).where(EventNotification.scheduled_at.is_(None))).all()
+    for n in rows:
+        db.delete(n)
+    if rows:
+        bump_version(db)
+    db.commit()
+    return {"deleted": len(rows)}
+
+
 @router.delete("/{notification_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_notification(notification_id: int, db: Session = Depends(get_db)):
     """Annulla una notifica programmata o rimuove dalla cronologia una già pubblicata."""

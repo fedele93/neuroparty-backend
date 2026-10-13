@@ -72,7 +72,7 @@ def test_assistant_reads_and_updates_profile(tmp_path):
 def test_import_guests_and_dashboard(tmp_path):
     n8n = FakeN8n()
     with _client(tmp_path, n8n) as c:
-        before = c.get("/api/guests").json()
+        before = c.get("/api/guests", headers=ADMIN).json()
         existing = before[0]["fullName"]
         rows = [
             {"fullName": existing, "email": "primo@example.org", "category": "Famigliari"},   # abbinato per nome: aggiornato
@@ -88,7 +88,7 @@ def test_import_guests_and_dashboard(tmp_path):
         assert d["dryRun"] and d["created"] == 2 and d["updated"] == 1 and d["skipped"] == 1 and d["invited"] == 0
         assert [x["action"] for x in d["rows"]] == ["updated", "created", "created", "skipped"]
         assert d["rows"][0]["changes"] == ["category", "email"] and d["rows"][1]["willInvite"] and not d["rows"][2]["willInvite"]
-        assert len(c.get("/api/guests").json()) == len(before) and _mails(n8n) == []
+        assert len(c.get("/api/guests", headers=ADMIN).json()) == len(before) and _mails(n8n) == []
         # import vero con invio dei link
         r = c.post("/api/guests/import", json={"rows": rows, "sendLinks": True}, headers=ADMIN)
         d = r.json()

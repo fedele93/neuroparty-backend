@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -6,7 +6,7 @@ import secrets
 
 from pydantic import BaseModel
 
-from ..auth import can_modify, get_client_id, is_admin, require_admin
+from ..auth import can_modify, can_see_lists, get_client_id, is_admin, require_admin
 from ..deadlines import deadlines_info
 from ..deps import get_db
 from ..models import BusBooking, Guest, now_ms
@@ -110,8 +110,17 @@ def summary(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/bookings")
-def list_bookings(db: Session = Depends(get_db)):
+def list_bookings(
+    db: Session = Depends(get_db), lists: bool = Depends(can_see_lists),
+    client_id: str | None = Depends(get_client_id), x_guest_token: str | None = Header(default=None),
+):
+    """Prenotazioni: tutte per organizzatori, festeggiati e cassieri; gli altri solo le proprie
+    (fatte da questo dispositivo o dal proprio profilo)."""
     rows = db.scalars(select(BusBooking).order_by(BusBooking.booked_at.desc())).all()
+    if not lists:
+        token = (x_guest_token or "").strip()
+        guest = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
+        rows = [b for b in rows if (client_id and b.owner_client_id == client_id) or (guest and b.guest_id == guest.id)]
     return [b.to_dict() for b in rows]
 
 

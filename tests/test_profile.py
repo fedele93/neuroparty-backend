@@ -21,8 +21,9 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         assert "link personale" in mails[0]["subject"] and "#profilo=" in mails[0]["text"] and "<a href" in mails[0]["html"]
         token = mails[0]["text"].split("#profilo=")[1].split()[0]
         assert mails[0]["outboxId"] >= 1
-        # la lista pubblica non mostra l'email; gli organizzatori sì
-        pub = next(g for g in c.get("/api/guests").json() if g["fullName"] == "Zia Pina")
+        # senza token si vede solo il proprio record (qui con il link personale), senza email; gli organizzatori vedono tutto
+        assert c.get("/api/guests").json() == []
+        pub = next(g for g in c.get("/api/guests", headers={"X-Guest-Token": token}).json() if g["fullName"] == "Zia Pina")
         assert "email" not in pub and pub["hasProfile"] is True and pub["rsvpStatus"] == "PENDING"
         adm = next(g for g in c.get("/api/guests", headers=ADMIN).json() if g["fullName"] == "Zia Pina")
         assert adm["email"] == "zia.pina@example.org" and adm["consentAt"] is None
@@ -54,7 +55,7 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         assert "Zio Tonio: menu completo" in conf["text"] and "Nipotina: senza glutine (celiaca)" in conf["text"] and "allergia alle noci" in conf["text"]
         assert "guest.updated" in n8n.events and n8n.payload(-2)["data"]["viaProfile"] is True
         # riepilogo per il catering con i menu
-        summary = c.get("/api/guests/summary").json()
+        summary = c.get("/api/guests/summary", headers=ADMIN).json()
         assert {m["menu"]: m["covers"] for m in summary["byMenu"]}["VEGETARIANO"] == 1
         assert {m["menu"]: m["covers"] for m in summary["byMenu"]}["SENZA_GLUTINE"] == 1
         # declinare azzera le persone
@@ -74,7 +75,7 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         assert c.post("/api/profile/request-link", json={"email": "non-valida"}).status_code == 422
 
         # 4) organizzatori: link e invito per un invitato demo
-        gatti = next(g for g in c.get("/api/guests").json() if g["fullName"].endswith("Gatti"))
+        gatti = next(g for g in c.get("/api/guests", headers=ADMIN).json() if g["fullName"].endswith("Gatti"))
         link = c.get(f"/api/guests/{gatti['id']}/link", headers=ADMIN).json()
         assert link["link"].startswith("https://festa.example.org/#profilo=") and link["guest"]["email"] == ""
         assert c.get(f"/api/guests/{gatti['id']}/link").status_code == 403
@@ -102,7 +103,7 @@ def test_mail_skipped_without_n8n(client):
     assert client.post("/api/mail/outbox/999/resend", headers=ADMIN).status_code == 404
     assert client.get("/api/mail/outbox").status_code == 403
     # il profilo funziona lo stesso tramite il link copiato dagli organizzatori
-    anna = next(g for g in client.get("/api/guests").json() if g["fullName"] == "Anna")
+    anna = next(g for g in client.get("/api/guests", headers=ADMIN).json() if g["fullName"] == "Anna")
     token = client.get(f"/api/guests/{anna['id']}/link", headers=ADMIN).json()["link"].split("#profilo=")[1]
     assert client.get("/api/profile", headers={"X-Guest-Token": token}).json()["guest"]["fullName"] == "Anna"
 
@@ -143,13 +144,13 @@ def test_schema_migration_adds_profile_columns(tmp_path):
     added = ensure_schema(make_engine(str(path)))
     assert {"+guests.email", "+guests.menu", "+guests.companions_json", "+guests.access_token", "+guests.consent_at"} <= set(added)
     with make_client(tmp_path, demo=False) as c:
-        g = c.get("/api/guests").json()[0]
+        g = c.get("/api/guests", headers=ADMIN).json()[0]
         assert g["fullName"] == "Vecchio" and g["companions"] == [] and g["menu"] == "" and g["hasProfile"] is False
-        assert c.get("/api/guests/summary").json()["byMenu"] == [{"menu": "", "covers": 2}]
+        assert c.get("/api/guests/summary", headers=ADMIN).json()["byMenu"] == [{"menu": "", "covers": 2}]
 
 
 def _token_for(c, name):
-    g = next(x for x in c.get("/api/guests").json() if x["fullName"] == name)
+    g = next(x for x in c.get("/api/guests", headers=ADMIN).json() if x["fullName"] == name)
     return c.get(f"/api/guests/{g['id']}/link", headers=ADMIN).json()["link"].split("#profilo=")[1], g["id"]
 
 
@@ -185,7 +186,7 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         # una sola prenotazione per profilo: la seconda chiamata la aggiorna
         r = c.put("/api/profile/bus", json={"seatsCount": 3, "pickupStop": "Policlinico di Bari (Piazzale Principale)"}, headers=G)
         assert r.json()["busBooking"]["seatsCount"] == 3 and r.json()["busBooking"]["id"] == b["id"]
-        assert len([x for x in c.get("/api/bus/bookings").json() if x["guestId"] == gatti_id]) == 1
+        assert len([x for x in c.get("/api/bus/bookings", headers=ADMIN).json() if x["guestId"] == gatti_id]) == 1
 
         # Sofia chiede 42 posti: ne restano 41 -> lista d'attesa + email dedicata
         r = c.put("/api/profile/bus", json={"seatsCount": 42}, headers=S)
@@ -231,7 +232,7 @@ def test_catering_summary_allergies_missing_menu_and_guest_csv(client):
     client.put("/api/profile", json={"fullName": "Dott. Luca Gatti", "rsvpStatus": "CONFIRMED", "menu": "VEGANO", "dietaryNotes": "allergia ai crostacei",
                                      "companions": [{"name": "Marta", "menu": "", "notes": "intollerante al lattosio"}], "consent": True, "phone": "333 1"},
                headers={"X-Guest-Token": token})
-    s = client.get("/api/guests/summary").json()
+    s = client.get("/api/guests/summary", headers=ADMIN).json()
     assert {a["name"]: a["notes"] for a in s["allergies"]} == {**{a["name"]: a["notes"] for a in s["allergies"]}, "Dott. Luca Gatti": "allergia ai crostacei", "Marta": "intollerante al lattosio"}
     assert "Marta (con Dott. Luca Gatti)" in s["missingMenu"]
     lines = client.get("/api/export/guests.csv", headers=ADMIN).text.lstrip("\ufeff").splitlines()

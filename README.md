@@ -17,8 +17,8 @@ arrivano davvero a tutti.
 | Invitati & RSVP | `GET/POST /api/guests`, `PUT/DELETE /api/guests/{id}` |
 | Riepilogo per il catering (coperti, categorie, menu speciali) | `GET /api/guests/summary` |
 | Navetta (con controllo dei 54 posti) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}` |
-| Bacheca auguri | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart` |
-| Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like` |
+| Bacheca auguri | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart`, `DELETE /api/wishes/{id}` (organizzatori) |
+| Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like`, `DELETE /api/photos/{id}` (organizzatori) |
 | Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |
 | Quota unica al cassiere (ripartita fra i neo-specialisti) | `POST /api/gifts/pool`, `GET /api/gifts/pool/mine`, `DELETE /api/gifts/pool/{id}` |
 | Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" (anche in blocco), appunti | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status`, `POST /api/gifts/pool/status`, `PATCH /api/gifts/pool/{id}` (token cassiere o organizzatori) |
@@ -27,7 +27,7 @@ arrivano davvero a tutti.
 | **Organizzatori**: cruscotto con i numeri e le cose da fare, import della lista invitati con invio dei link personali | `GET /api/admin/dashboard`, `POST /api/guests/import` (`rows`, `sendLinks`, `dryRun`) |
 | **Area festeggiato**: chi viene, auguri ricevuti, le proprie coordinate, il proprio avatar | `GET /api/graduate/me` (header `X-Graduate-Token`, `GRADUATE_TOKEN_<ID>`); stesso token su `/api/assistant/admin/avatars/<proprio id>` |
 | Notifiche (cronologia + **Web Push** a tutti i dispositivi) | `GET /api/notifications`, `POST /api/notifications` (solo organizzatori) |
-| Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
+| Notifiche programmate (`sendAt` nel POST), elenco e annullamento; svuotare la cronologia | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}`, `DELETE /api/notifications` (solo organizzatori) |
 | Export CSV per ristorante, autista e cassiere | `GET /api/export/guests.csv`, `GET /api/export/bus.csv` (solo organizzatori), `GET /api/export/gift-pool.csv` (cassiere o organizzatori) |
 | Sottoscrizione push del browser | `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` |
 | Automazioni con **n8n**: report pronto per mail (JSON/testo/HTML), stato dei webhook, test | `GET /api/automation/report[.txt|.html]`, `GET /api/automation/status`, `POST /api/automation/webhook-test` (token automazioni o organizzatori) |
@@ -40,12 +40,20 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
 - ogni dispositivo si presenta con un `X-Client-Id` casuale: chi inserisce un invitato o una
   prenotazione può modificarlo o cancellarlo;
 - gli organizzatori usano `X-Admin-Token` (valore di `ADMIN_TOKEN` nel `.env`): possono inviare
-  notifiche push e cancellare qualsiasi record;
+  notifiche push, cancellare qualsiasi record (invitati, prenotazioni, auguri, foto), svuotare la
+  cronologia delle notifiche, importare la lista invitati e vedere il cruscotto;
+- **elenchi riservati**: la lista degli invitati (e il riepilogo catering) e quella delle prenotazioni
+  navetta sono complete solo con un token di organizzatore, festeggiato o cassiere; senza token
+  ogni dispositivo vede soltanto i record creati da sé (`X-Client-Id`) o il proprio profilo
+  (`X-Guest-Token`), anche in `GET /api/snapshot`;
 - le automazioni (n8n) usano `X-Automation-Token` (`AUTOMATION_TOKEN`): sola lettura su report,
   riepiloghi ed export CSV;
-- il cassiere delle quote uniche usa `X-Treasurer-Token` (`TREASURER_TOKEN`): vede e gestisce
-  solo le quote uniche (elenco, stato "ricevuta", appunti, promemoria ai donatori, CSV), senza i
-  poteri dell'organizzatore;
+- il cassiere delle quote uniche usa `X-Treasurer-Token` (`TREASURER_TOKEN_<ID>`, uno per
+  cassiere, oppure `TREASURER_TOKEN` per tutti): vede e gestisce solo le proprie quote (elenco,
+  cifre, stato "ricevuta", appunti, promemoria ai donatori, CSV), senza i poteri
+  dell'organizzatore. **Le cifre raccolte le vede solo chi ha questo token**: il token organizzatore
+  non apre il cruscotto delle quote, e cruscotto organizzatori e report n8n riportano solo i
+  conteggi (quante quote, quante ricevute), mai gli importi;
 - ogni festeggiato usa `X-Graduate-Token` (`GRADUATE_TOKEN_<ID>`, es. `GRADUATE_TOKEN_LUISI`):
   apre la propria area (chi ha confermato, auguri per lui, coordinate di pagamento come le vedono
   gli invitati, posti navetta) e configura solo il proprio avatar dell'assistente, senza il
@@ -109,7 +117,7 @@ nano .env
 | `ADMIN_TOKEN` | stringa segreta lunga (`openssl rand -hex 24`) |
 | `VAPID_SUBJECT` | `mailto:fedeleluisi@gmail.com` |
 | `SEED_DEMO_DATA` | `false` in produzione (`true` solo per provare con dati finti) |
-| `TREASURER_TOKEN` | token dei cassieri delle quote uniche (`openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni; `TREASURER_TOKEN_<ID>` (es. `TREASURER_TOKEN_AKI`) limita la vista a un solo cassiere |
+| `TREASURER_TOKEN_<ID>` | un token per cassiere (es. `TREASURER_TOKEN_ROBERTO`, `TREASURER_TOKEN_AKI`, `openssl rand -hex 24`), da inserire nella PWA in ⚙️ Impostazioni: ognuno vede solo le proprie quote. `TREASURER_TOKEN` (facoltativo) vede tutti i cassieri. Il token organizzatore non basta per le quote |
 | `GRADUATE_TOKEN_<ID>` | token personale di un festeggiato (`<ID>` = id in `giftTargets`, es. `GRADUATE_TOKEN_LUISI`), da inserire nella PWA in ⚙️ Impostazioni per l'area 🎓 Festeggiato |
 | `MISTRAL_API_KEY` | chiave API Mistral per l'assistente vocale (vuota = assistente spento); vedi *Assistente vocale* |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
@@ -203,7 +211,7 @@ già inoltrato al container `api`):
 1. **n8n legge dal backend** (per report periodici): con il token di sola lettura
    `AUTOMATION_TOKEN` (header `X-Automation-Token`) n8n può chiamare
    - `GET /api/automation/report` — JSON completo: coperti confermati e menu speciali, posti
-     navetta per fermata, quote uniche al cassiere (totali e per neo-specialista), novità nelle
+     navetta per fermata, quote uniche ai cassieri (solo conteggi, mai cifre), novità nelle
      ultime `sinceHours` ore (default 24: nuovi RSVP, prenotazioni, quote, auguri, foto),
      notifiche programmate;
    - `GET /api/automation/report.txt` e `.html` — lo stesso report già impaginato, da incollare

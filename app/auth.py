@@ -9,8 +9,10 @@
 - X-Graduate-Token: token di un festeggiato (GRADUATE_TOKEN_<ID>): area festeggiato e il proprio
   avatar dell'assistente. Anche X-Admin-Token è accettato.
 - X-Treasurer-Token: token dei cassieri delle quote uniche (TREASURER_TOKEN per tutti, oppure
-  TREASURER_TOKEN_<ID> per un solo cassiere): elenco e stato delle quote, CSV. Anche
-  X-Admin-Token è accettato su questi endpoint.
+  TREASURER_TOKEN_<ID> per un solo cassiere): elenco e stato delle quote, CSV. Le cifre delle
+  quote le vede SOLO chi ha questo token: il token organizzatore non basta.
+- Elenchi di invitati e prenotazioni navetta: completi solo con un token (organizzatore,
+  festeggiato o cassiere); gli altri vedono soltanto i propri record (X-Client-Id o X-Guest-Token).
 """
 import secrets
 
@@ -68,11 +70,11 @@ def treasurer_scope(
     x_treasurer_token: str | None = Header(default=None),
 ) -> set[str] | None | bool:
     """Chi è il chiamante per le quote uniche:
-    - None  = organizzatore o TREASURER_TOKEN: vede tutti i cassieri;
+    - None  = TREASURER_TOKEN: vede tutti i cassieri;
     - set   = TREASURER_TOKEN_<ID>: vede solo quei cassieri;
-    - False = nessun token valido."""
+    - False = nessun token cassiere valido (il token organizzatore NON vale: le cifre restano ai cassieri)."""
     settings = request.app.state.settings
-    if _matches(x_admin_token, settings.admin_token) or _matches(x_treasurer_token, settings.treasurer_token):
+    if _matches(x_treasurer_token, settings.treasurer_token):
         return None
     for collector_id, token in settings.treasurer_tokens.items():
         if _matches(x_treasurer_token, token):
@@ -89,7 +91,7 @@ def is_treasurer(
 
 
 def _any_treasurer_token(settings) -> bool:
-    return bool(settings.admin_token or settings.treasurer_token or settings.treasurer_tokens)
+    return bool(settings.treasurer_token or settings.treasurer_tokens)
 
 
 def require_treasurer(
@@ -97,14 +99,14 @@ def require_treasurer(
     x_admin_token: str | None = Header(default=None),
     x_treasurer_token: str | None = Header(default=None),
 ) -> set[str] | None:
-    """Endpoint del cassiere delle quote uniche: TREASURER_TOKEN, TREASURER_TOKEN_<ID> oppure ADMIN_TOKEN.
+    """Endpoint del cassiere delle quote uniche: TREASURER_TOKEN oppure TREASURER_TOKEN_<ID>.
     Ritorna i cassieri visibili (None = tutti)."""
     settings = request.app.state.settings
     if not _any_treasurer_token(settings):
-        raise HTTPException(status_code=503, detail="ADMIN_TOKEN/TREASURER_TOKEN non configurati sul server")
+        raise HTTPException(status_code=503, detail="TREASURER_TOKEN non configurato sul server")
     scope = treasurer_scope(request, x_admin_token, x_treasurer_token)
     if scope is False:
-        raise HTTPException(status_code=403, detail="Token cassiere o organizzatore non valido")
+        raise HTTPException(status_code=403, detail="Token cassiere non valido")
     return scope
 
 
@@ -114,7 +116,7 @@ def require_treasurer_or_automation(
     x_treasurer_token: str | None = Header(default=None),
     x_automation_token: str | None = Header(default=None),
 ) -> set[str] | None:
-    """Sola lettura (CSV delle quote uniche): cassiere, organizzatore o automazioni. Ritorna i cassieri visibili."""
+    """Sola lettura (CSV delle quote uniche): cassiere o automazioni (n8n). Ritorna i cassieri visibili."""
     settings = request.app.state.settings
     scope = treasurer_scope(request, x_admin_token, x_treasurer_token)
     if scope is not False:
@@ -123,7 +125,7 @@ def require_treasurer_or_automation(
         return None
     if not (_any_treasurer_token(settings) or settings.automation_token):
         raise HTTPException(status_code=503, detail="Nessun token configurato sul server")
-    raise HTTPException(status_code=403, detail="Token cassiere, organizzatore o automazioni non valido")
+    raise HTTPException(status_code=403, detail="Token cassiere o automazioni non valido")
 
 
 def graduate_scope(
@@ -164,3 +166,28 @@ def can_modify(owner_client_id: str | None, admin: bool, client_id: str | None) 
     if admin:
         return True
     return bool(owner_client_id) and owner_client_id == client_id
+
+
+# ---------------------------------------------------------------- elenchi riservati
+
+
+def lists_allowed(request: Request) -> bool:
+    """True se il chiamante può vedere gli elenchi completi di invitati e prenotazioni navetta:
+    organizzatore (ADMIN_TOKEN), festeggiato (GRADUATE_TOKEN_<ID>) o cassiere (TREASURER_TOKEN[_<ID>])."""
+    settings = request.app.state.settings
+    h = request.headers
+    if _matches(h.get("x-admin-token"), settings.admin_token):
+        return True
+    if treasurer_scope(request, None, h.get("x-treasurer-token")) is not False:
+        return True
+    gt = h.get("x-graduate-token")
+    return bool(gt) and any(_matches(gt, t) for t in settings.graduate_tokens.values())
+
+
+def can_see_lists(request: Request) -> bool:
+    return lists_allowed(request)
+
+
+def require_lists(request: Request) -> None:
+    if not lists_allowed(request):
+        raise HTTPException(status_code=403, detail="Elenco riservato a organizzatori, festeggiati e cassieri")

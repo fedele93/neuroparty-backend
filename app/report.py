@@ -24,7 +24,6 @@ from .models import (
     Wish,
     now_ms,
 )
-from .routers.gifts import pool_summary
 from .routers.guests import _NO_DIET, guests_summary
 from .schedule import get_schedule
 from .state import get_version
@@ -44,9 +43,6 @@ def _fmt_ts(ms: int | None) -> str:
     return (dt.astimezone(_TZ) if _TZ else dt.astimezone()).strftime("%d/%m/%Y %H:%M")
 
 
-def _fmt_eur(value: float) -> str:
-    s = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{s} €"
 
 
 def _plural(n: int, one: str, many: str) -> str:
@@ -127,7 +123,9 @@ def build_report(
             "byStop": _by_stop(bookings),
         },
         # quote uniche versate al cassiere (le donazioni dirette ai neo-specialisti non passano dal server)
-        "gifts": {**pool_summary(pool, targets), "graduates": len(targets)},
+        # quote uniche: solo conteggi, mai cifre (le vedono soltanto i cassieri con il loro token)
+        "gifts": {"contributions": len(pool), "received": sum(1 for c in pool if c.status == "RECEIVED"),
+                  "pending": sum(1 for c in pool if c.status != "RECEIVED"), "graduates": len(targets)},
         "wishes": {"count": len(wishes), "hearts": sum(w.heart_count for w in wishes)},
         "photos": {"count": len(photos), "likes": sum(p.likes_count for p in photos)},
         "notifications": {
@@ -146,7 +144,8 @@ def build_report(
             "busBookings": [b.to_dict() for b in recent_bookings],
             "wishes": [w.to_dict() for w in recent_wishes],
             "photos": [p.to_dict(base_url) for p in recent_photos],
-            "giftPool": [c.to_dict() for c in recent_pool],
+            "giftPool": [{"id": c.id, "donorName": c.donor_name, "collectorName": c.collector_name, "paymentMethod": c.payment_method,
+                          "status": c.status, "createdAt": c.created_at, "graduates": len(c.allocations)} for c in recent_pool],
             "counts": {
                 "guests": len(recent_guests),
                 "busBookings": len(recent_bookings),
@@ -208,13 +207,9 @@ def _lines(report: dict) -> list[tuple[str, list[str]]]:
         bus_lines.append("Per fermata: " + ", ".join(f"{s['stop']} {s['seats']}" for s in bus["byStop"]) + ".")
 
     gift_lines = [
-        f"Quote uniche al cassiere: {gifts['contributions']} per {_fmt_eur(gifts['totalAmount'])} "
-        f"(ricevute {gifts['received']} per {_fmt_eur(gifts['receivedAmount'])}, "
-        f"in attesa {_fmt_eur(gifts['pendingAmount'])})."
+        f"Quote uniche ai cassieri: {gifts['contributions']} registrate ({gifts['received']} ricevute, "
+        f"{gifts['pending']} in attesa). Le cifre le vedono solo i cassieri con il loro token (CSV quote-uniche)."
     ]
-    for t in gifts["byGraduate"]:
-        if t["contributions"]:
-            gift_lines.append(f"{t['graduateName']}: {_fmt_eur(t['amount'])} da {_plural(t['contributions'], 'quota', 'quote')}")
     gift_lines.append("Le donazioni dirette ai neo-specialisti non passano dal server.")
 
     c = rec["counts"]
@@ -233,8 +228,8 @@ def _lines(report: dict) -> list[tuple[str, list[str]]]:
             recent_lines.append(f"Navetta: {b['passengerName']}, {seats}, {b['pickupStop'] or 'fermata da indicare'}")
         for k in rec["giftPool"]:
             recent_lines.append(
-                f"Quota unica: {k['donorName']} {_fmt_eur(k['totalAmount'])} ({k['paymentMethod']}) "
-                f"per {_plural(len(k['allocations']), 'neo-specialista', 'neo-specialisti')}"
+                f"Quota unica: {k['donorName']} ({k['paymentMethod']}, a {k['collectorName'] or 'cassiere'}) "
+                f"per {_plural(k['graduates'], 'neo-specialista', 'neo-specialisti')}"
             )
         for w in rec["wishes"]:
             recent_lines.append(f"Augurio di {w['authorName']} per {w['targetGraduate']}: \"{w['message'][:120]}\"")

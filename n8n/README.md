@@ -16,7 +16,7 @@ backend  --POST evento JSON (X-Automation-Secret)-->  n8n nodo Webhook      (il 
 `Schedule Trigger → Impostazioni → HTTP Request → Send Email`
 
 Ogni giorno alle 8:00 (ora italiana) scarica `GET /api/automation/report.html` e lo spedisce
-via mail: coperti confermati e menu speciali, posti navetta per fermata, quote uniche al cassiere,
+via mail: coperti confermati e menu speciali, posti navetta per fermata, quote uniche (solo conteggi: le cifre le vedono i cassieri),
 novità delle ultime 24 ore, notifiche programmate.
 
 Da compilare nel nodo **Impostazioni**:

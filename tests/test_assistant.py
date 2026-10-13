@@ -75,7 +75,7 @@ def test_tools_read_and_write_through_the_app(bot):
     assert r["actions"][0]["tool"] == "book_bus" and r["actions"][0]["ok"]
     assert "Nonna Lina" in r["actions"][0]["summary"] and r["reply"].startswith("Fatto!")
     assert bot.get("/api/bus/summary").json()["bookedSeats"] == before + 2
-    booking = next(b for b in bot.get("/api/bus/bookings").json() if b["passengerName"] == "Nonna Lina")
+    booking = next(b for b in bot.get("/api/bus/bookings", headers=ADMIN).json() if b["passengerName"] == "Nonna Lina")
     assert bot.delete(f"/api/bus/bookings/{booking['id']}", headers={"X-Client-Id": "tel-1"}).status_code == 204  # proprietà del dispositivo
     # navigazione
     r = bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "Apri la sezione navetta"}).json()
@@ -94,7 +94,8 @@ def test_execute_tool_rsvp_wish_and_errors(bot):
         assert out["created"] is True and out["guest"]["guestsCount"] == 3
         out = execute_tool("set_rsvp", {"fullName": "zia pina", "status": "DECLINED", "guestsCount": 0}, request, db, "dev-1")
         assert out["created"] is False and out["guest"]["rsvpStatus"] == "DECLINED"
-        assert execute_tool("find_guest", {"name": "pina"}, request, db, None)["count"] == 1
+        assert execute_tool("find_guest", {"name": "pina"}, request, db, "dev-1")["count"] == 1  # proprio record
+        assert execute_tool("find_guest", {"name": "pina"}, request, db, None)["count"] == 0  # elenco riservato
         out = execute_tool("post_wish", {"authorName": "Zia Pina", "message": "Bravi tutti!"}, request, db, None)
         assert out["navigate"] == "wishes" and out["wish"]["targetGraduate"] == "Tutti i Laureandi"
         assert "error" in execute_tool("book_bus", {"passengerName": "Troppi", "seatsCount": 60}, request, db, None)

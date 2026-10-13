@@ -19,7 +19,7 @@ def test_health_and_event(client):
 
 
 def test_demo_seed_matches_json(client):
-    snap = client.get("/api/snapshot").json()
+    snap = client.get("/api/snapshot", headers=ADMIN).json()
     assert len(snap["guests"]) == 7
     assert len(snap["busBookings"]) == 3
     assert len(snap["wishes"]) == 10
@@ -30,7 +30,7 @@ def test_demo_seed_matches_json(client):
     assert len(snap["notifications"]) == 4
     assert snap["version"] >= 1
     # le quote demo esistono ma le vede solo il cassiere
-    pool = client.get("/api/gifts/pool", headers=ADMIN).json()
+    pool = client.get("/api/gifts/pool", headers=TREASURER).json()
     assert pool["summary"]["contributions"] == 3 and pool["summary"]["received"] == 1
     assert pool["summary"]["totalAmount"] == 180 + 150 + 90
 
@@ -39,7 +39,7 @@ def test_empty_seed_keeps_only_gift_targets(empty_client):
     snap = empty_client.get("/api/snapshot").json()
     assert snap["guests"] == [] and snap["wishes"] == [] and snap["notifications"] == []
     assert len(snap["giftTargets"]) == 9
-    assert empty_client.get("/api/gifts/pool", headers=ADMIN).json()["contributions"] == []
+    assert empty_client.get("/api/gifts/pool", headers=TREASURER).json()["contributions"] == []
 
 
 def test_guest_crud_and_ownership(client):
@@ -69,7 +69,7 @@ def test_guest_crud_and_ownership(client):
     assert client.delete(f"/api/guests/{g['id']}", headers={"X-Client-Id": "dev-A"}).status_code == 204
     assert client.delete(f"/api/guests/{g['id']}").status_code == 404
 
-    seeded = client.get("/api/guests").json()[0]  # record senza owner: solo l'organizzatore
+    seeded = client.get("/api/guests", headers=ADMIN).json()[0]  # record senza owner: solo l'organizzatore
     assert client.delete(f"/api/guests/{seeded['id']}", headers={"X-Client-Id": "dev-A"}).status_code == 403
     assert client.delete(f"/api/guests/{seeded['id']}", headers=ADMIN).status_code == 204
 
@@ -194,14 +194,14 @@ def test_pool_mine_and_delete_ownership(client):
     # un altro dispositivo non può cancellarla; il proprietario sì finché è in attesa
     assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=b).status_code == 403
     assert client.delete(f"/api/gifts/pool/{mine['id']}").status_code == 403
-    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "RECEIVED"}, headers=ADMIN)
+    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "RECEIVED"}, headers=TREASURER)
     assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 409  # già ricevuta
-    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "PENDING"}, headers=ADMIN)
+    client.patch(f"/api/gifts/pool/{mine['id']}/status", json={"status": "PENDING"}, headers=TREASURER)
     assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 204
     assert client.delete(f"/api/gifts/pool/{mine['id']}", headers=a).status_code == 404
     # il cassiere/organizzatore cancella sempre
     other = client.post("/api/gifts/pool", json={"donorName": "Bruno", "totalAmount": 9}, headers=b).json()
-    assert client.delete(f"/api/gifts/pool/{other['id']}", headers=ADMIN).status_code == 204
+    assert client.delete(f"/api/gifts/pool/{other['id']}", headers=TREASURER).status_code == 204
 
 
 def test_pool_treasurer_dashboard_and_csv(tmp_path):
@@ -235,7 +235,7 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert c.get("/api/export/guests.csv", headers=TREASURER).status_code == 403
 
         # CSV: cassiere in seconda colonna, una colonna per neo-specialista, totali per cassiere e complessivi; virgola decimale
-        for headers in (TREASURER, ADMIN, {"X-Automation-Token": "n8n-test"}):
+        for headers in (TREASURER, {"X-Automation-Token": "n8n-test"}):
             r = c.get("/api/export/gift-pool.csv", headers=headers)
             assert r.status_code == 200
         assert 'filename="quote-uniche.csv"' in r.headers["content-disposition"]
@@ -266,14 +266,14 @@ def test_per_collector_treasurer_token_sees_only_own_quotas(tmp_path, monkeypatc
     monkeypatch.setenv("TREASURER_TOKEN_AKI", "aki-secret")
     assert Settings().treasurer_tokens == {"aki": "aki-secret"}
     AKI = {"X-Treasurer-Token": "aki-secret"}
-    with make_client(tmp_path, treasurer_token="") as c:
+    with make_client(tmp_path) as c:  # TREASURER (globale) vede tutto, AKI solo le sue
         c.app.state.settings.treasurer_tokens = {"aki": "aki-secret"}
         assert c.get("/api/state").json()["treasurerEnabled"] is True
         board = c.get("/api/gifts/pool", headers=AKI).json()
         assert [x["id"] for x in board["collectors"]] == ["aki"]
         assert [k["donorName"] for k in board["contributions"]] == ["Amici del corso"]
         assert board["summary"]["totalAmount"] == 90 and [x["collectorId"] for x in board["summary"]["byCollector"]] == ["aki"]
-        paolo_quota = next(k for k in c.get("/api/gifts/pool", headers=ADMIN).json()["contributions"] if k["collectorId"] == "roberto")
+        paolo_quota = next(k for k in c.get("/api/gifts/pool", headers=TREASURER).json()["contributions"] if k["collectorId"] == "roberto")
         assert c.patch(f"/api/gifts/pool/{paolo_quota['id']}/status", json={"status": "RECEIVED"}, headers=AKI).status_code == 403
         assert c.delete(f"/api/gifts/pool/{paolo_quota['id']}", headers=AKI).status_code == 403
         mine = board["contributions"][0]
@@ -294,7 +294,7 @@ def test_legacy_pool_rows_belong_to_first_collector(tmp_path):
     con.execute("UPDATE gift_pool_contributions SET collector_id = '', collector_name = ''")
     con.commit(); con.close()
     with make_client(tmp_path, demo=False) as c:
-        board = c.get("/api/gifts/pool", headers=ADMIN).json()
+        board = c.get("/api/gifts/pool", headers=TREASURER).json()
         assert board["contributions"][0]["collectorId"] == "roberto" and board["contributions"][0]["collectorName"] == "Dott. Paolo Roberto"
         assert next(x for x in board["summary"]["byCollector"] if x["collectorId"] == "roberto")["contributions"] == 1
 
@@ -359,7 +359,7 @@ def test_vapid_keys_persist_across_restarts(tmp_path):
     with make_client(tmp_path) as c2:
         k2 = c2.get("/api/push/vapid-public-key").json()["publicKey"]
         # anche il DB persiste (nessun doppio seed)
-        assert len(c2.get("/api/guests").json()) == 7
+        assert len(c2.get("/api/guests", headers=ADMIN).json()) == 7
     assert k1 == k2
 
 
@@ -382,9 +382,9 @@ def test_new_gift_target_added_to_existing_database(tmp_path):
         assert next(t for t in targets if t["id"] == "regina")["name"] == "Dott. Donato Regina"
         assert targets[-1]["id"] == "regina"  # rispetta l'ordine del JSON
         assert c2.get("/api/state").json()["version"] == v1 + 1  # i client ricaricano
-        assert len(c2.get("/api/guests").json()) == 7  # nessun doppio seed demo
+        assert len(c2.get("/api/guests", headers=ADMIN).json()) == 7  # nessun doppio seed demo
         # le quote registrate prima restano (con la ripartizione di allora)
-        board = c2.get("/api/gifts/pool", headers=ADMIN).json()
+        board = c2.get("/api/gifts/pool", headers=TREASURER).json()
         zia = next(k for k in board["contributions"] if k["donorName"] == "Zia")
         assert len(zia["allocations"]) == 8 and all(a["amount"] == 10 for a in zia["allocations"])
 
@@ -406,7 +406,7 @@ def test_gift_target_removed_from_json_disappears(tmp_path):
     with make_client(tmp_path) as c2:
         assert len(c2.get("/api/gifts/targets").json()) == 9
         assert c2.get("/api/state").json()["version"] == v1 + 1
-        csv_head = c2.get("/api/export/gift-pool.csv", headers=ADMIN).text.splitlines()[0]
+        csv_head = c2.get("/api/export/gift-pool.csv", headers=TREASURER).text.splitlines()[0]
         assert csv_head.endswith(";Dott. Extra")
 
 
@@ -503,7 +503,7 @@ def test_calendar_ics(tmp_path):
 
 
 def test_guests_summary(client):
-    s = client.get("/api/guests/summary").json()
+    s = client.get("/api/guests/summary", headers=ADMIN).json()
     assert s["confirmedGuests"] == 5 and s["covers"] == 10
     assert s["pendingGuests"] == 1 and s["pendingCovers"] == 2 and s["declinedGuests"] == 1
     cats = {c["category"]: c for c in s["byCategory"]}
@@ -612,9 +612,10 @@ def test_iban_validation_detects_placeholders():
     with open(SEED, encoding="utf-8") as f:
         data = json.load(f)
     issues = placeholder_gift_issues(data)
-    assert len(issues) == len(data["giftTargets"]) + 2  # tutti segnaposto, due cassieri compresi
+    fake_targets = [t for t in data["giftTargets"] if not iban_is_valid(t["iban"])]
+    assert len(issues) == len(fake_targets) + 2  # i regali con IBAN segnaposto, due cassieri compresi
     assert issues[0].startswith("cassiere 'roberto'") and issues[1].startswith("cassiere 'aki'")
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     for c in data["giftCollectors"]:
         c["iban"] = "IT60 X054 2811 1010 0000 0123 456"
-    assert len(placeholder_gift_issues(data)) == len(data["giftTargets"]) - 1
+    assert len(placeholder_gift_issues(data)) == len([t for t in data["giftTargets"][1:] if not iban_is_valid(t["iban"])])

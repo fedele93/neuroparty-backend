@@ -153,12 +153,12 @@ def test_report_json_text_html(client):
 
     rep = client.get("/api/automation/report", headers=ADMIN).json()
     assert rep["event"]["partyDate"] == "2026-11-13" and rep["event"]["title"]
-    assert rep["guests"]["totalGuests"] == 8 and rep["guests"]["covers"] == client.get("/api/guests/summary").json()["covers"]
+    assert rep["guests"]["totalGuests"] == 8 and rep["guests"]["covers"] == client.get("/api/guests/summary", headers=ADMIN).json()["covers"]
     assert rep["bus"] == {**rep["bus"], "maxSeats": 54, "bookedSeats": 10, "availableSeats": 44, "bookings": 3}
     assert sum(s["seats"] for s in rep["bus"]["byStop"]) == 10
     assert rep["gifts"]["graduates"] == 9 and rep["gifts"]["contributions"] == 3
-    assert rep["gifts"]["totalAmount"] == 420 and rep["gifts"]["receivedAmount"] == 180
-    assert sum(g["amount"] for g in rep["gifts"]["byGraduate"]) == 420
+    # niente cifre nel report: le vedono solo i cassieri con il loro token
+    assert rep["gifts"]["received"] + rep["gifts"]["pending"] == 3 and "totalAmount" not in rep["gifts"] and "byGraduate" not in rep["gifts"]
     assert rep["wishes"]["count"] == 10 and rep["photos"]["count"] == 3
     assert [n["title"] for n in rep["notifications"]["scheduled"]] == ["Promemoria"]
     # i dati demo vengono creati "adesso", quindi contano anch'essi come novità delle ultime 24 ore
