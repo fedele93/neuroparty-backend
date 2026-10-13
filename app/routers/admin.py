@@ -66,8 +66,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         },
         "bus": {**bus, "bookings": len(bookings), "withEmail": sum(1 for b in bookings if b.guest_id)},
         "mail": {"enabled": mailer.enabled, "counts": mail_counts, "failed": [m.to_dict() for m in failed_mails]},
+        # quote uniche: solo conteggi, mai cifre (le vedono soltanto i cassieri con il loro token)
         "pool": {"contributions": pool["contributions"], "pending": pool["pending"], "received": pool["received"],
-                 "totalAmount": pool["totalAmount"], "receivedAmount": pool["receivedAmount"],
                  "collectors": [{"id": c["id"], "name": c["name"]} for c in gift_collectors_info(request.app.state.event_data)]},
         "wishes": int(db.scalar(select(func.count()).select_from(Wish)) or 0),
         "photos": int(db.scalar(select(func.count()).select_from(SharedPhoto)) or 0),
