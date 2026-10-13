@@ -22,7 +22,7 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -32,7 +32,7 @@ from ..assistant import SECTIONS, clean_history, run_turn
 from ..auth import get_client_id, graduate_scope
 from ..deps import get_db
 from ..mistral import MistralError
-from ..models import AssistantAvatar, now_ms
+from ..models import Guest, AssistantAvatar, now_ms
 from ..state import bump_version
 
 log = logging.getLogger("neuroparty.assistant")
@@ -116,11 +116,16 @@ async def talk(
     audio: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
+    x_guest_token: str | None = Header(default=None),
 ):
     svc = _svc(request)
     if not svc.client.enabled:
         raise HTTPException(503, "Assistente non configurato sul server (MISTRAL_API_KEY mancante)")
     avatar = _get_avatar(db, avatarId)
+    # chi ha aperto il proprio profilo può chiedere all'avatar del SUO menu/navetta (token sbagliato = nessun profilo)
+    guest = None
+    if (x_guest_token or "").strip():
+        guest = db.scalars(select(Guest).where(Guest.access_token == x_guest_token.strip())).first()
     if not avatar.is_ready(svc.voices.fallback_available):
         raise HTTPException(409, "Questo avatar non è ancora disponibile")
     try:
@@ -146,7 +151,7 @@ async def talk(
         raise HTTPException(422, "Non ho sentito nulla: riprova parlando più vicino al microfono, oppure scrivi il messaggio")
 
     try:
-        turn = run_turn(svc.client, avatar, user_text[:2000], past, request, db, client_id)
+        turn = run_turn(svc.client, avatar, user_text[:2000], past, request, db, client_id, guest)
     except MistralError as e:
         raise HTTPException(502, f"Assistente non disponibile: {e}") from e
 
@@ -156,6 +161,7 @@ async def talk(
         "transcript": transcript,
         "userText": user_text,
         "reply": turn["reply"],
+        "profile": guest is not None,
         "audio": audio_b64,
         "audioMime": mime,
         "actions": turn["actions"],

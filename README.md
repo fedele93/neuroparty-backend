@@ -24,6 +24,7 @@ arrivano davvero a tutti.
 | Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" (anche in blocco), appunti | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status`, `POST /api/gifts/pool/status`, `PATCH /api/gifts/pool/{id}` (token cassiere o organizzatori) |
 | **Profilo invitato** con link personale via email: RSVP, accompagnatori, menu, navetta | `POST /api/profile/request-link`, `GET/PUT /api/profile`, `PUT/DELETE /api/profile/bus` (header `X-Guest-Token`) |
 | **Email tramite n8n** (evento `mail.send`): esiti, rinvio, prova, promemoria menu/navetta/quote | `GET /api/mail/status`, `GET /api/mail/outbox`, `POST /api/mail/outbox/{id}/resend`, `POST /api/mail/test` (organizzatori); `POST /api/mail/reminders/menu|bus` (automazioni), `POST /api/mail/reminders/pool?days=N` (cassieri o automazioni) |
+| **Organizzatori**: cruscotto con i numeri e le cose da fare, import della lista invitati con invio dei link personali | `GET /api/admin/dashboard`, `POST /api/guests/import` (`rows`, `sendLinks`, `dryRun`) |
 | **Area festeggiato**: chi viene, auguri ricevuti, le proprie coordinate, il proprio avatar | `GET /api/graduate/me` (header `X-Graduate-Token`, `GRADUATE_TOKEN_<ID>`); stesso token su `/api/assistant/admin/avatars/<proprio id>` |
 | Notifiche (cronologia + **Web Push** a tutti i dispositivi) | `GET /api/notifications`, `POST /api/notifications` (solo organizzatori) |
 | Notifiche programmate (`sendAt` nel POST), elenco e annullamento | `GET /api/notifications/scheduled`, `DELETE /api/notifications/{id}` (solo organizzatori) |
@@ -263,6 +264,10 @@ italiano, con tono gentile, sia per iscritto sia a voce. Conosce programma, orar
 navetta e regali (senza cifre) e può agire sull'app: dire quanti posti restano sulla navetta,
 cercare un invitato, confermare o modificare un RSVP, prenotare la navetta, pubblicare un
 augurio, aprire una sezione. Prima di ogni azione che scrive dati riassume e chiede conferma.
+Chi ha aperto il proprio profilo (la PWA manda `X-Guest-Token` anche a `/api/assistant/talk`)
+può chiedere del **suo** menu, dei suoi accompagnatori e della sua navetta: l'avatar usa gli
+strumenti `get_my_profile`, `update_my_profile`, `book_my_bus` e `cancel_my_bus`, che passano
+dalle stesse regole del profilo (consenso, date limite, lista d'attesa, email di conferma).
 
 Tutto passa dal server (app/assistant.py, app/routers/assistant.py) usando le API Mistral con
 `MISTRAL_API_KEY` nel `.env`: la chiave non arriva mai ai telefoni.

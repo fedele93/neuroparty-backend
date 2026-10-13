@@ -18,8 +18,9 @@ from .mistral import MistralClient, MistralError
 from .models import AssistantAvatar, Guest
 from .routers import bus as bus_router
 from .routers import guests as guests_router
+from .routers import profile as profile_router
 from .routers import wishes as wishes_router
-from .schemas import BookingIn, GuestIn, GuestUpdate, WishIn
+from .schemas import BookingIn, CompanionIn, GuestIn, GuestUpdate, ProfileBusIn, ProfileIn, WishIn
 from .seed import gift_collectors_info, public_event_info
 
 log = logging.getLogger("neuroparty.assistant")
@@ -120,7 +121,71 @@ TOOLS: list[dict] = [
     },
 ]
 
-WRITE_TOOLS = {"set_rsvp", "book_bus", "post_wish"}
+MENU_LABELS = {"": "da scegliere", "STANDARD": "menu completo", "VEGETARIANO": "vegetariano", "VEGANO": "vegano", "SENZA_GLUTINE": "senza glutine", "ALTRO": "altro"}
+MENU_VALUES = ["STANDARD", "VEGETARIANO", "VEGANO", "SENZA_GLUTINE", "ALTRO"]
+
+# Strumenti disponibili solo quando l'utente ha aperto il proprio profilo (X-Guest-Token)
+PROFILE_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_profile",
+            "description": "Il profilo dell'utente che sta parlando: partecipazione, menu e allergie, accompagnatori con il loro menu, "
+                           "prenotazione della navetta, date limite. Usalo per rispondere a domande su 'il mio' profilo/menu/navetta.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_my_profile",
+            "description": "Aggiorna il profilo dell'utente: partecipazione, menu, allergie, accompagnatori (nome e menu). "
+                           "Passa solo i campi da cambiare. Chiamala SOLO dopo aver riassunto le modifiche e avuto il sì dell'utente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rsvpStatus": {"type": "string", "enum": ["CONFIRMED", "PENDING", "DECLINED"]},
+                    "menu": {"type": "string", "enum": MENU_VALUES, "description": "Menu dell'utente"},
+                    "dietaryNotes": {"type": "string", "description": "Allergie o esigenze, vuoto se nessuna"},
+                    "companions": {
+                        "type": "array", "description": "Elenco COMPLETO degli accompagnatori (sostituisce quello attuale)",
+                        "items": {"type": "object", "properties": {"name": {"type": "string"}, "menu": {"type": "string", "enum": MENU_VALUES}, "notes": {"type": "string"}}, "required": ["name"]},
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "book_my_bus",
+            "description": "Prenota o modifica la navetta dal profilo dell'utente (una sola prenotazione per profilo; se i posti sono finiti "
+                           "entra in lista d'attesa). Chiamala SOLO dopo conferma esplicita di posti e fermata.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 54, "description": "Se omesso: le persone del profilo"},
+                    "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
+                    "returnTripWanted": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_my_bus",
+            "description": "Annulla la prenotazione della navetta dell'utente. Chiamala SOLO dopo conferma esplicita.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+WRITE_TOOLS = {"set_rsvp", "book_bus", "post_wish", "update_my_profile", "book_my_bus", "cancel_my_bus"}
+
+
+def tools_for(guest: Guest | None) -> list[dict]:
+    return TOOLS + (PROFILE_TOOLS if guest is not None else [])
 
 
 def _fmt_date(iso: str) -> str:
@@ -174,7 +239,19 @@ def event_facts(event_data: dict, max_seats: int) -> str:
     return "\n".join(lines)
 
 
-def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now: datetime | None = None) -> str:
+def profile_facts(guest: Guest | None) -> str:
+    """Riga di contesto sul profilo di chi parla (se ha aperto il link personale)."""
+    if guest is None:
+        return ("L'utente NON ha aperto il proprio profilo personale: se chiede del suo menu, dei suoi accompagnatori o della sua navetta, "
+                "spiega che deve aprire il profilo dal pulsante con l'omino in alto (o dal link ricevuto via email) e offri di aprire la sezione Invitati.")
+    comps = ", ".join(f"{c.get('name') or 'accompagnatore'} ({MENU_LABELS.get(c.get('menu') or '', 'da scegliere')})" for c in guest.companions) or "nessuno"
+    return (f"L'utente che parla ha il profilo di {guest.full_name} ({RSVP_LABELS.get(guest.rsvp_status, guest.rsvp_status)}, "
+            f"menu {MENU_LABELS.get(guest.menu or '', 'da scegliere')}, accompagnatori: {comps}). Rivolgiti a lui per nome. "
+            "Per il SUO profilo, menu, accompagnatori e navetta usa get_my_profile, update_my_profile, book_my_bus e cancel_my_bus "
+            "(non set_rsvp o book_bus, che servono per altre persone).")
+
+
+def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now: datetime | None = None, guest: Guest | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     persona = avatar.persona.strip() or f"Sei {avatar.short_name}, uno dei neo-specialisti festeggiati."
     return (
@@ -189,7 +266,8 @@ def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now
         "un RSVP, prenotare la navetta, pubblicare un augurio, aprire una sezione. Prima di ogni azione che scrive dati "
         "(set_rsvp, book_bus, post_wish) riassumi i dati e chiedi conferma; chiama lo strumento solo dopo un sì esplicito. "
         "Dopo l'azione conferma in una frase cosa hai fatto. Se manca un dato indispensabile (es. il nome), chiedilo.\n"
-        f"Oggi è {_fmt_date(now.date().isoformat())}.\n\n"
+        f"Oggi è {_fmt_date(now.date().isoformat())}.\n"
+        + profile_facts(guest) + "\n\n"
         "DATI DELLA FESTA\n" + event_facts(event_data, max_seats)
     )
 
@@ -209,9 +287,64 @@ def _find_guests(db: Session, name: str) -> list[Guest]:
     return db.scalars(select(Guest).where(func.lower(Guest.full_name).contains(q)).order_by(Guest.full_name.asc()).limit(5)).all()
 
 
-def execute_tool(name: str, args: dict, request: Request, db: Session, client_id: str | None) -> dict:
+def _profile_dict(guest: Guest, db: Session, request: Request) -> dict:
+    """Il profilo in forma leggibile per il modello (etichette in italiano, niente token)."""
+    p = profile_router._profile_payload(guest, db, request)
+    g = p["guest"]
+    booking = p["busBooking"]
+    return {
+        "fullName": g["fullName"], "rsvpStatus": g["rsvpStatus"], "rsvpLabel": RSVP_LABELS.get(g["rsvpStatus"], g["rsvpStatus"]),
+        "guestsCount": g["guestsCount"], "menu": g["menu"], "menuLabel": MENU_LABELS.get(g["menu"] or "", "da scegliere"),
+        "dietaryNotes": g["dietaryNotes"],
+        "companions": [{"name": c.get("name"), "menu": c.get("menu") or "", "menuLabel": MENU_LABELS.get(c.get("menu") or "", "da scegliere"), "notes": c.get("notes") or ""} for c in g["companions"]],
+        "consentGiven": g["consentAt"] is not None,
+        "bus": None if booking is None else {
+            "seatsCount": booking["seatsCount"], "pickupStop": booking["pickupStop"], "returnTripWanted": booking["returnTripWanted"],
+            "status": booking["status"], "statusLabel": "in lista d'attesa" if booking["status"] == "WAITLIST" else "confermata", "code": booking["code"],
+        },
+        "deadlines": p["deadlines"],
+    }
+
+
+def _profile_summary(d: dict) -> str:
+    comps = ", ".join(f"{c['name']} ({c['menuLabel']})" for c in d["companions"]) or "nessuno"
+    bus = f"navetta {d['bus']['statusLabel']} per {d['bus']['seatsCount']} posti" + (f" da {d['bus']['pickupStop']}" if d['bus'] and d['bus']['pickupStop'] else "") if d["bus"] else "nessuna prenotazione navetta"
+    return f"{d['fullName']}: {d['rsvpLabel']}, {d['guestsCount']} persone, menu {d['menuLabel']}, accompagnatori: {comps}; {bus}."
+
+
+def execute_tool(name: str, args: dict, request: Request, db: Session, client_id: str | None, guest: Guest | None = None) -> dict:
     """Esegue uno strumento e ritorna un dizionario serializzabile per il modello."""
     try:
+        if name in {t["function"]["name"] for t in PROFILE_TOOLS}:
+            if guest is None:
+                return {"error": "L'utente non ha aperto il proprio profilo: deve aprirlo dal link personale (pulsante con l'omino in alto)", "navigate": "rsvp"}
+            if name == "get_my_profile":
+                d = _profile_dict(guest, db, request)
+                return {"profile": d, "summary": _profile_summary(d)}
+            if name == "update_my_profile":
+                if guest.consent_at is None:
+                    return {"error": "Prima di modificare il profilo serve il consenso al trattamento dei dati: va dato una volta aprendo il profilo", "navigate": "rsvp"}
+                comps_in = args.get("companions")
+                companions = [CompanionIn(name=str(c.get("name") or ""), menu=c.get("menu") or "", notes=str(c.get("notes") or "")) for c in (comps_in or []) if isinstance(c, dict)] \
+                    if comps_in is not None else [CompanionIn(**c) for c in guest.companions]
+                body = ProfileIn(
+                    fullName=guest.full_name, category=guest.category, rsvpStatus=args.get("rsvpStatus") or guest.rsvp_status,
+                    email=guest.email, phone=guest.phone, menu=args.get("menu") if args.get("menu") is not None else guest.menu,
+                    dietaryNotes=args.get("dietaryNotes") if args.get("dietaryNotes") is not None else guest.dietary_notes,
+                    companions=companions, consent=True,
+                )
+                profile_router.update_profile(body, request, guest, db)
+                d = _profile_dict(guest, db, request)
+                return {"profile": d, "summary": "Profilo aggiornato. " + _profile_summary(d), "navigate": "rsvp"}
+            if name == "book_my_bus":
+                body = ProfileBusIn(seatsCount=args.get("seatsCount"), pickupStop=args.get("pickupStop") or "", returnTripWanted=bool(args.get("returnTripWanted", True)))
+                profile_router.set_bus(body, request, guest, db)
+                d = _profile_dict(guest, db, request)
+                b = d["bus"]
+                return {"profile": d, "summary": f"Navetta {b['statusLabel']}: {b['seatsCount']} posti" + (f" da {b['pickupStop']}" if b["pickupStop"] else "") + f", codice {b['code']}.", "navigate": "bus"}
+            if name == "cancel_my_bus":
+                profile_router.cancel_bus(request, guest, db)
+                return {"summary": "Prenotazione della navetta annullata.", "navigate": "bus"}
         if name == "get_bus_availability":
             return bus_router.bus_summary(request, db)
         if name == "find_guest":
@@ -279,18 +412,19 @@ def clean_history(history: list | None) -> list[dict]:
 
 def run_turn(
     client: MistralClient, avatar: AssistantAvatar, user_text: str, history: list[dict],
-    request: Request, db: Session, client_id: str | None,
+    request: Request, db: Session, client_id: str | None, guest: Guest | None = None,
 ) -> dict:
     """Un turno di conversazione: ritorna testo di risposta, azioni eseguite e sezione da aprire."""
     max_seats = bus_router.max_seats(request)
-    messages: list[dict] = [{"role": "system", "content": system_prompt(avatar, request.app.state.event_data, max_seats)}]
+    tools = tools_for(guest)
+    messages: list[dict] = [{"role": "system", "content": system_prompt(avatar, request.app.state.event_data, max_seats, guest=guest)}]
     messages += history
     messages.append({"role": "user", "content": user_text})
     actions: list[dict] = []
     navigate: str | None = None
     reply = ""
     for _ in range(MAX_TOOL_ROUNDS + 1):
-        msg = client.chat(messages, tools=TOOLS)
+        msg = client.chat(messages, tools=tools)
         tool_calls = msg.get("tool_calls") or []
         content = msg.get("content")
         if isinstance(content, list):  # contenuto a blocchi: teniamo il testo
@@ -307,7 +441,7 @@ def run_turn(
                 args = json.loads(raw) if isinstance(raw, str) else dict(raw)
             except json.JSONDecodeError:
                 args = {}
-            result = execute_tool(name, args, request, db, client_id)
+            result = execute_tool(name, args, request, db, client_id, guest)
             if result.get("navigate"):
                 navigate = result["navigate"]
             actions.append({"tool": name, "args": args, "ok": "error" not in result, "summary": result.get("summary") or result.get("error", "")})

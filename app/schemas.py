@@ -84,6 +84,28 @@ class ProfileBusIn(BaseModel):
     notes: str = Field(default="", max_length=500)
 
 
+class ImportRowIn(BaseModel):
+    """Una riga dell'import invitati (CSV incollato o caricato dagli organizzatori)."""
+    fullName: str = Field(default="", max_length=200)
+    category: str = Field(default="", max_length=100)
+    email: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=100)
+    guestsCount: int | None = Field(default=None, ge=0, le=50)
+    rsvpStatus: RsvpStatus | None = None
+
+    @field_validator("fullName", "category", "email", "phone")
+    @classmethod
+    def strip(cls, v: str, info) -> str:
+        v = _clean(v)
+        return v.lower() if info.field_name == "email" else v
+
+
+class ImportIn(BaseModel):
+    rows: list[ImportRowIn] = Field(default_factory=list, max_length=1000)
+    sendLinks: bool = False  # manda il link personale a chi ha l'email
+    dryRun: bool = False  # solo anteprima: niente scritture né email
+
+
 class GuestUpdate(BaseModel):
     fullName: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, max_length=100)

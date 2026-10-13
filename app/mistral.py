@@ -164,10 +164,12 @@ class FakeMistralClient(MistralClient):
             result = json.loads(last.get("content") or "{}")
             if "availableSeats" in result:
                 return {"role": "assistant", "content": f"Sulla navetta restano {result['availableSeats']} posti liberi su {result['maxSeats']}."}
-            if result.get("navigate"):
-                return {"role": "assistant", "content": "Ecco, ti ho aperto la sezione."}
             if result.get("error"):
                 return {"role": "assistant", "content": f"Non ci sono riuscito: {result['error']}"}
+            if result.get("profile") and result.get("summary"):
+                return {"role": "assistant", "content": result["summary"]}
+            if result.get("navigate") and not result.get("summary", "").startswith(("Prenotazione", "Augurio")):
+                return {"role": "assistant", "content": "Ecco, ti ho aperto la sezione."}
             return {"role": "assistant", "content": "Fatto! " + (result.get("summary") or "")}
         text = (last.get("content") or "").lower()
         tool_names = {t["function"]["name"] for t in (tools or [])}
@@ -179,6 +181,17 @@ class FakeMistralClient(MistralClient):
 
         if "posti" in text and "get_bus_availability" in tool_names:
             return call("get_bus_availability", {})
+        if "mio profilo" in text or "mio menu" in text or "miei accompagnatori" in text:
+            if "get_my_profile" in tool_names and not text.startswith("cambia"):
+                return call("get_my_profile", {})
+            if text.startswith("cambia il mio menu in ") and "update_my_profile" in tool_names:
+                menu = {"vegetariano": "VEGETARIANO", "vegano": "VEGANO", "senza glutine": "SENZA_GLUTINE", "completo": "STANDARD"}.get(text[len("cambia il mio menu in "):].strip().rstrip("."), "ALTRO")
+                return call("update_my_profile", {"menu": menu})
+            return {"role": "assistant", "content": "Per il tuo profilo apri il link personale dal pulsante con l'omino in alto."}
+        if text.startswith("prenota la mia navetta") and "book_my_bus" in tool_names:
+            return call("book_my_bus", {"returnTripWanted": True})
+        if text.startswith("annulla la mia navetta") and "cancel_my_bus" in tool_names:
+            return call("cancel_my_bus", {})
         if text.startswith("apri ") and "open_section" in tool_names:
             for key, section in (("programma", "program"), ("invitat", "rsvp"), ("navetta", "bus"), ("augur", "wishes"), ("regal", "gifts")):
                 if key in text:
