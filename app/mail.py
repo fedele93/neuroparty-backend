@@ -62,7 +62,8 @@ def event_summary(event_data: dict) -> dict:
         "partyDate": format_date_it(sch.get("partyDate", "")),
         "partyDateIso": sch.get("partyDate", ""),
         "partyTime": sch.get("partyTime") or "",
-        "location": program.get("locationLabel") or "",
+        # luogo della festa (partyLocationLabel); locationLabel elenca anche l'aula della seduta
+        "location": program.get("partyLocationLabel") or program.get("locationLabel") or "",
         "busDepartureTime": sch.get("busDepartureTime") or "",
         "busFrom": bus.get("from") or "",
         "busTo": bus.get("to") or "",

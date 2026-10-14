@@ -53,6 +53,8 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         conf = _mail_events(n8n)[-1]
         assert conf["to"] == "zia.pina@example.org" and "Confermata" in conf["subject"] and "3 persone" in conf["subject"]
         assert "Zio Tonio: menu completo" in conf["text"] and "Nipotina: senza glutine (celiaca)" in conf["text"] and "allergia alle noci" in conf["text"]
+        # luogo della festa: solo il Giardino dei Tempi, non l'aula della seduta
+        assert "Giardino dei Tempi" in conf["text"] and "Aula Magna" not in conf["text"] and "Aula Magna" not in conf["html"]
         assert "guest.updated" in n8n.events and n8n.payload(-2)["data"]["viaProfile"] is True
         # riepilogo per il catering con i menu
         summary = c.get("/api/guests/summary", headers=ADMIN).json()
@@ -172,14 +174,14 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         assert prof["busBooking"] is None and prof["bus"]["availableSeats"] == 44 and prof["deadlines"]["busDeadline"] == "2026-11-11"
 
         # prenotazione dal profilo: posti = persone (2), email di conferma con il file calendario
-        r = c.put("/api/profile/bus", json={"pickupStop": "Stazione Ferroviaria Centrale di Bari", "returnTripWanted": True}, headers=G)
+        r = c.put("/api/profile/bus", json={"pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)", "returnTripWanted": True}, headers=G)
         assert r.status_code == 200, r.text
         b = r.json()["busBooking"]
         assert b["seatsCount"] == 2 and b["status"] == "CONFIRMED" and b["guestId"] == gatti_id and b["code"].startswith("NP-")
         assert b["passengerName"] == "Dott. Luca Gatti" and r.json()["bus"]["bookedSeats"] == 12
         mail = _mail_events(n8n)[-1]
         assert mail["kind"] == "bus_confirmation" and mail["to"] == "gatti@example.org" and b["code"] in mail["subject"]
-        assert "Stazione Ferroviaria Centrale di Bari" in mail["text"] and mail["attachments"][0]["filename"] == "navetta.ics"
+        assert "Piazza Giulio Cesare" in mail["text"] and mail["attachments"][0]["filename"] == "navetta.ics"
         import base64
         ics = base64.b64decode(mail["attachments"][0]["contentBase64"]).decode()
         assert "BEGIN:VEVENT" in ics and "DTSTART;VALUE=DATE:20261113" in ics and b["code"] in ics  # orario navetta da definire: tutto il giorno
