@@ -17,8 +17,8 @@ arrivano davvero a tutti.
 | Invitati & RSVP | `GET/POST /api/guests`, `PUT/DELETE /api/guests/{id}` |
 | Riepilogo per il catering (coperti, categorie, menu speciali) | `GET /api/guests/summary` |
 | Navetta (con controllo dei 54 posti) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}` |
-| Bacheca auguri | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart`, `DELETE /api/wishes/{id}` (organizzatori) |
-| Galleria foto (upload, ridimensionamento a 1600 px) | `GET/POST /api/photos`, `POST /api/photos/{id}/like`, `DELETE /api/photos/{id}` (organizzatori) |
+| Bacheca auguri (solo registrati e ruoli) | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart`, `DELETE /api/wishes/{id}` (organizzatori) |
+| Galleria foto (upload, ridimensionamento a 1600 px; solo registrati e ruoli) | `GET/POST /api/photos`, `POST /api/photos/{id}/like`, `DELETE /api/photos/{id}` (organizzatori) |
 | Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |
 | Quota unica al cassiere (ripartita fra i neo-specialisti) | `POST /api/gifts/pool`, `GET /api/gifts/pool/mine`, `DELETE /api/gifts/pool/{id}` |
 | Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" (anche in blocco), appunti | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status`, `POST /api/gifts/pool/status`, `PATCH /api/gifts/pool/{id}` (token cassiere o organizzatori) |
@@ -46,6 +46,12 @@ Documentazione interattiva (Swagger) su `https://<tuo-dominio>/docs`.
   navetta sono complete solo con un token di organizzatore, festeggiato o cassiere; senza token
   ogni dispositivo vede soltanto i record creati da sé (`X-Client-Id`) o il proprio profilo
   (`X-Guest-Token`), anche in `GET /api/snapshot`;
+- **foto e auguri riservati**: vedere, pubblicare e mettere cuori/like a foto e auguri è possibile solo
+  per gli invitati registrati (`X-Guest-Token` valido: hanno aperto il link personale ricevuto via
+  email, anche se hanno risposto "non vengo") e per organizzatori, festeggiati e cassieri; gli altri
+  ricevono `401`, e `GET /api/snapshot` restituisce liste vuote con `canSeeMemories: false` (lo stesso
+  campo è in `GET /api/state`). Gli invitati firmano sempre col nome del profilo. I file in `/uploads/`
+  restano serviti direttamente: hanno nomi casuali non indovinabili;
 - le automazioni (n8n) usano `X-Automation-Token` (`AUTOMATION_TOKEN`): sola lettura su report,
   riepiloghi ed export CSV;
 - il cassiere delle quote uniche usa `X-Treasurer-Token` (`TREASURER_TOKEN_<ID>`, uno per
@@ -351,8 +357,13 @@ conferma con IBAN e causale e, se la quota resta in attesa, un promemoria (dal c
 workflow n8n settimanale); il cassiere ha i pulsanti "contatta", gli appunti per ogni quota e
 può segnare più quote ricevute in una volta.
 
-Ogni neo-specialista può avere in `giftTargets` un campo privato `email` (mai esposto dalle API):
-riceve un'email a ogni augurio che lo riguarda. Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
+Ogni neo-specialista può avere un'email privata (mai esposta dalle API): riceve un'email a ogni
+augurio che lo riguarda. Va nel `.env` come `GRADUATE_EMAIL_<ID>` (es. `GRADUATE_EMAIL_TOTARO`),
+non nel campo `email` di `giftTargets`: il JSON è pubblico (repository e PWA).
+Con l'email configurata il festeggiato entra anche **senza token**: in ⚙️ → "Sono un festeggiato"
+scrive la sua email (`POST /api/graduate/request-link`) e riceve il link
+`https://<app>/#festeggiato=<token>`, che apre la sua area e vale come `GRADUATE_TOKEN_<ID>`
+(il token è salvato nel database ed è sempre lo stesso; la risposta non rivela se l'email esiste). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
 nella PWA la propria area 🎓 (⚙️ Impostazioni → token festeggiato).
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti

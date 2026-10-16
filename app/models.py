@@ -201,6 +201,8 @@ class GiftTarget(Base):
     satispay_url: Mapped[str] = mapped_column(String(300), default="")
     paypal_me_url: Mapped[str] = mapped_column(String(300), default="")
     email: Mapped[str] = mapped_column(String(200), default="")  # privata: avvisi al festeggiato (auguri ricevuti)
+    # link personale del festeggiato (https://<app>/#festeggiato=<token>), mandato alla sua email: vale come GRADUATE_TOKEN_<ID>
+    access_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     @property

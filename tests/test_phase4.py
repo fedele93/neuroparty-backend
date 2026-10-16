@@ -39,7 +39,7 @@ def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
         # email non valida -> 422; senza email nessuna mail
         bad = {**body, "email": "non-una-mail"}
         assert c.post("/api/gifts/pool", json=bad, headers={"X-Client-Id": "x"}).status_code == 422
-        r2 = c.post("/api/gifts/pool", json={**body, "email": "", "donorName": "Bruno", "collectorId": "aki", "paymentMethod": "Contanti"}, headers={"X-Client-Id": "tel-bruno"})
+        r2 = c.post("/api/gifts/pool", json={**body, "email": "", "donorName": "Bruno", "collectorId": "aki", "paymentMethod": "PayPal"}, headers={"X-Client-Id": "tel-bruno"})
         assert r2.status_code == 201 and "mail" not in r2.json() and len(_mails(n8n)) == 1
 
         # nota del cassiere: solo nel proprio ambito
@@ -85,7 +85,7 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
     n8n = FakeN8n()
     with _client(tmp_path, n8n) as c:
         # senza email privata del festeggiato nessuna mail per gli auguri
-        c.post("/api/wishes", json={"authorName": "Zia Pina", "targetGraduate": "Fedele Luisi", "message": "Bravo!"}, headers={"X-Client-Id": "z"})
+        c.post("/api/wishes", json={"authorName": "Zia Pina", "targetGraduate": "Fedele Luisi", "message": "Bravo!"}, headers={**ADMIN, "X-Client-Id": "z"})
         assert _mails(n8n) == []
         # email del festeggiato (privata: non esce dalle API pubbliche)
         from app.models import GiftTarget
@@ -95,12 +95,12 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
             db.commit()
         pub = next(t for t in c.get("/api/gifts/targets").json() if t["id"] == "luisi")
         assert "email" not in pub and pub["shortName"] == "Fedele Luisi"
-        r = c.post("/api/wishes", json={"authorName": "Nonna", "targetGraduate": "Fedele Luisi", "message": "Auguri dottore"}, headers={"X-Client-Id": "n"})
+        r = c.post("/api/wishes", json={"authorName": "Nonna", "targetGraduate": "Fedele Luisi", "message": "Auguri dottore"}, headers={**ADMIN, "X-Client-Id": "n"})
         assert r.status_code == 201
         mails = _mails(n8n)
         assert len(mails) == 1 and mails[0]["kind"] == "wish_received" and mails[0]["to"] == "fedele@example.org"
         assert "Nonna" in mails[0]["subject"] and "Auguri dottore" in mails[0]["text"]
-        c.post("/api/wishes", json={"authorName": "Tutti", "targetGraduate": "Tutti i Laureandi", "message": "Evviva"}, headers={"X-Client-Id": "t"})
+        c.post("/api/wishes", json={"authorName": "Tutti", "targetGraduate": "Tutti i Laureandi", "message": "Evviva"}, headers={**ADMIN, "X-Client-Id": "t"})
         assert len(_mails(n8n)) == 1
 
         # area festeggiato
@@ -138,3 +138,52 @@ def test_graduate_without_tokens_is_503(tmp_path):
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 503
     with make_client(tmp_path / "b") as c:  # con ADMIN_TOKEN ma senza token festeggiati: 403, non 503
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 403
+
+
+def test_graduate_email_from_env_gets_wish_mail(tmp_path):
+    """GRADUATE_EMAIL_<ID>: email privata del festeggiato fuori dal JSON pubblico."""
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n, graduate_emails={"totaro": "dalila@example.org"}) as c:
+        from app.models import GiftTarget
+        with c.app.state.session_factory() as db:
+            assert db.get(GiftTarget, "totaro").email == "dalila@example.org"
+        assert "email" not in next(t for t in c.get("/api/gifts/targets").json() if t["id"] == "totaro")
+        r = c.post("/api/wishes", json={"authorName": "Zia", "targetGraduate": "Dalila Totaro", "message": "Brava Dalila!"}, headers=ADMIN)
+        assert r.status_code == 201
+        mails = _mails(n8n)
+        assert len(mails) == 1 and mails[0]["kind"] == "wish_received" and mails[0]["to"] == "dalila@example.org"
+
+
+def test_graduate_link_by_email(tmp_path):
+    """Il festeggiato si fa mandare il link (#festeggiato=<token>) all'email privata: vale come GRADUATE_TOKEN."""
+    import re
+
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n, graduate_emails={"totaro": "Dalila@Example.org"}) as c:
+        r = c.post("/api/graduate/request-link", json={"email": "dalila@example.org"})
+        assert r.status_code == 202 and r.json()["queued"] is True
+        mails = _mails(n8n)
+        assert len(mails) == 1 and mails[0]["kind"] == "graduate_link" and mails[0]["to"] == "Dalila@Example.org"
+        token = re.search(r"#festeggiato=([A-Za-z0-9_-]+)", mails[0]["text"]).group(1)
+        assert "https://festa.example.org/#festeggiato=" in mails[0]["text"]
+        H = {"X-Graduate-Token": token}
+        me = c.get("/api/graduate/me", headers=H).json()
+        assert me["graduate"]["id"] == "totaro"
+        st = c.get("/api/state", headers=H).json()
+        assert st["roles"]["graduate"] == "totaro" and st["canSeeLists"] is True and st["canSeeMemories"] is True
+        assert c.get("/api/assistant/admin/avatars", headers=H).status_code == 200  # il proprio avatar
+        # stesso link a ogni richiesta; email sconosciuta: stessa risposta, nessuna mail
+        c.post("/api/graduate/request-link", json={"email": "DALILA@example.org"})
+        assert token in _mails(n8n)[-1]["text"] and len(_mails(n8n)) == 2
+        other = c.post("/api/graduate/request-link", json={"email": "chiunque@example.org"})
+        assert other.json()["message"] == r.json()["message"] and len(_mails(n8n)) == 2
+        assert c.post("/api/graduate/request-link", json={"email": "non-una-mail"}).status_code == 422
+        # token sbagliato: niente area, niente elenchi
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token[:-1] + "x"}).status_code == 403
+        assert c.get("/api/state", headers={"X-Graduate-Token": "x" * 30}).json()["roles"]["graduate"] is None
+
+
+def test_graduate_link_without_mail_says_so(tmp_path):
+    with make_client(tmp_path, graduate_emails={"totaro": "dalila@example.org"}) as c:
+        r = c.post("/api/graduate/request-link", json={"email": "dalila@example.org"})
+        assert r.status_code == 202 and r.json()["queued"] is False and "organizzatori" in r.json()["message"]

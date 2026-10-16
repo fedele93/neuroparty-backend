@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .auth import lists_allowed
+from .auth import lists_allowed, memories_access
 from .mistral import MistralClient, MistralError
 from .models import AssistantAvatar, Guest
 from .routers import bus as bus_router
@@ -382,9 +382,12 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
                     + (f" da {out['pickupStop']}" if out["pickupStop"] else "") + f". Restano {summary['availableSeats']} posti.",
                     "booking": out, "bus": summary}
         if name == "post_wish":
+            allowed, member = memories_access(request, db)
+            if not allowed:
+                return {"error": "Gli auguri li pubblica solo chi è registrato: l'utente deve aprire il link personale ricevuto via email (pulsante con l'omino in alto)", "navigate": "rsvp"}
             body = WishIn(authorName=args.get("authorName") or "Amico/a", targetGraduate=args.get("targetGraduate") or "Tutti i Laureandi",
                           message=(args.get("message") or "").strip())
-            out = wishes_router.create_wish(body, request, db)
+            out = wishes_router.create_wish(body, request, db, member)
             return {"summary": f"Augurio di {out['authorName']} per {out['targetGraduate']} pubblicato in bacheca.", "wish": out, "navigate": "wishes"}
         if name == "open_section":
             section = args.get("section")

@@ -6,17 +6,25 @@
   (invitato, prenotazione bus) può poi modificarlo o cancellarlo.
 - X-Automation-Token: token di sola lettura per le automazioni (n8n): report, riepiloghi,
   export CSV. Anche X-Admin-Token è accettato su questi endpoint.
-- X-Graduate-Token: token di un festeggiato (GRADUATE_TOKEN_<ID>): area festeggiato e il proprio
-  avatar dell'assistente. Anche X-Admin-Token è accettato.
+- X-Graduate-Token: token di un festeggiato (GRADUATE_TOKEN_<ID> nel .env, oppure quello del link
+  personale mandato alla sua email, #festeggiato=<token>): area festeggiato e il proprio avatar
+  dell'assistente. Anche X-Admin-Token è accettato.
 - X-Treasurer-Token: token dei cassieri delle quote uniche (TREASURER_TOKEN per tutti, oppure
   TREASURER_TOKEN_<ID> per un solo cassiere): elenco e stato delle quote, CSV. Le cifre delle
   quote le vede SOLO chi ha questo token: il token organizzatore non basta.
 - Elenchi di invitati e prenotazioni navetta: completi solo con un token (organizzatore,
   festeggiato o cassiere); gli altri vedono soltanto i propri record (X-Client-Id o X-Guest-Token).
+- Foto e auguri: solo per chi è registrato (X-Guest-Token valido, cioè ha aperto il link personale
+  ricevuto via email, qualunque sia la sua risposta) o ha un token organizzatore, festeggiato o cassiere.
 """
 import secrets
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .deps import get_db
+from .models import GiftTarget, Guest
 
 
 def get_client_id(x_client_id: str | None = Header(default=None)) -> str | None:
@@ -128,6 +136,22 @@ def require_treasurer_or_automation(
     raise HTTPException(status_code=403, detail="Token cassiere o automazioni non valido")
 
 
+def graduate_for_token(request: Request, token: str | None) -> str | None:
+    """Id del festeggiato a cui appartiene il token: GRADUATE_TOKEN_<ID> del .env oppure il token del
+    link personale ricevuto via email (salvato nel database). None se non vale."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    for graduate_id, expected in request.app.state.settings.graduate_tokens.items():
+        if _matches(token, expected):
+            return graduate_id
+    if len(token) < 20:  # i token dei link sono lunghi: niente query per valori palesemente sbagliati
+        return None
+    with request.app.state.session_factory() as db:
+        target = db.scalars(select(GiftTarget).where(GiftTarget.access_token == token)).first()
+        return target.id if target is not None else None
+
+
 def graduate_scope(
     request: Request,
     x_admin_token: str | None = Header(default=None),
@@ -138,10 +162,8 @@ def graduate_scope(
     e se è sbagliato non vale nemmeno l'organizzatore: così la PWA può scartarlo subito."""
     settings = request.app.state.settings
     if x_graduate_token:
-        for graduate_id, token in settings.graduate_tokens.items():
-            if _matches(x_graduate_token, token):
-                return {graduate_id}
-        return False
+        graduate_id = graduate_for_token(request, x_graduate_token)
+        return {graduate_id} if graduate_id else False
     if _matches(x_admin_token, settings.admin_token):
         return None
     return False
@@ -152,14 +174,21 @@ def require_graduate(
     x_admin_token: str | None = Header(default=None),
     x_graduate_token: str | None = Header(default=None),
 ) -> set[str] | None:
-    """Area festeggiato: GRADUATE_TOKEN_<ID> oppure ADMIN_TOKEN. Ritorna i festeggiati visibili (None = tutti)."""
+    """Area festeggiato: GRADUATE_TOKEN_<ID>, link personale del festeggiato oppure ADMIN_TOKEN.
+    Ritorna i festeggiati visibili (None = tutti)."""
     settings = request.app.state.settings
-    if not settings.admin_token and not settings.graduate_tokens:
-        raise HTTPException(status_code=503, detail="ADMIN_TOKEN/GRADUATE_TOKEN non configurati sul server")
     scope = graduate_scope(request, x_admin_token, x_graduate_token)
     if scope is False:
+        if not settings.admin_token and not settings.graduate_tokens and not _any_graduate_email(request):
+            raise HTTPException(status_code=503, detail="ADMIN_TOKEN/GRADUATE_TOKEN non configurati sul server")
         raise HTTPException(status_code=403, detail="Token festeggiato o organizzatore non valido")
     return scope
+
+
+def _any_graduate_email(request: Request) -> bool:
+    """C'è almeno un festeggiato con l'email privata (quindi può accedere col link via email)?"""
+    with request.app.state.session_factory() as db:
+        return db.scalar(select(GiftTarget.id).where(GiftTarget.email != "").limit(1)) is not None
 
 
 def can_modify(owner_client_id: str | None, admin: bool, client_id: str | None) -> bool:
@@ -180,8 +209,7 @@ def lists_allowed(request: Request) -> bool:
         return True
     if treasurer_scope(request, None, h.get("x-treasurer-token")) is not False:
         return True
-    gt = h.get("x-graduate-token")
-    return bool(gt) and any(_matches(gt, t) for t in settings.graduate_tokens.values())
+    return graduate_for_token(request, h.get("x-graduate-token")) is not None
 
 
 def can_see_lists(request: Request) -> bool:
@@ -202,11 +230,34 @@ def roles_for(request: Request) -> dict:
     settings = request.app.state.settings
     h = request.headers
     scope = treasurer_scope(request, None, h.get("x-treasurer-token"))
-    gt = h.get("x-graduate-token")
-    graduate = next((gid for gid, t in settings.graduate_tokens.items() if _matches(gt, t)), None) if gt else None
+    graduate = graduate_for_token(request, h.get("x-graduate-token"))
     return {
         "admin": _matches(h.get("x-admin-token"), settings.admin_token),
         "treasurer": scope is not False,
         "treasurerIds": sorted(scope) if isinstance(scope, set) else [],
         "graduate": graduate,
     }
+
+
+# ---------------------------------------------------------------- foto e auguri (solo registrati)
+
+MEMBERS_ONLY = "Foto e auguri sono riservati agli invitati registrati: apri il link personale che ti abbiamo mandato via email"
+
+
+def memories_access(request: Request, db: Session) -> tuple[bool, Guest | None]:
+    """Chi può vedere e pubblicare foto e auguri: (accesso, invitato).
+    - invitato registrato: X-Guest-Token valido (ha aperto il link personale; vale anche chi ha detto "non vengo");
+    - organizzatore, festeggiato o cassiere: token del ruolo (gli stessi degli elenchi riservati)."""
+    token = (request.headers.get("x-guest-token") or "").strip()
+    guest = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
+    if guest is not None:
+        return True, guest
+    return lists_allowed(request), None
+
+
+def require_member(request: Request, db: Session = Depends(get_db)) -> Guest | None:
+    """Dipendenza degli endpoint di foto e auguri: 401 a chi non è registrato. Ritorna l'invitato (None per i ruoli)."""
+    allowed, guest = memories_access(request, db)
+    if not allowed:
+        raise HTTPException(status_code=401, detail=MEMBERS_ONLY)
+    return guest

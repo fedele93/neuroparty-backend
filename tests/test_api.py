@@ -4,7 +4,7 @@ import re
 
 from PIL import Image
 
-from conftest import ADMIN, SEED, TREASURER, make_client
+from conftest import ADMIN, SEED, TREASURER, guest_headers, make_client
 
 
 def test_health_and_event(client):
@@ -15,7 +15,7 @@ def test_health_and_event(client):
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
-    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
+    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal"]  # Aki: niente contanti
 
 
 def test_demo_seed_matches_json(client):
@@ -100,15 +100,49 @@ def test_bus_capacity(client):
 
 
 def test_wishes(client):
-    r = client.post("/api/wishes", json={"authorName": "", "message": " Auguri! ", "targetGraduate": "Fedele Luisi"})
+    r = client.post("/api/wishes", json={"authorName": "", "message": " Auguri! ", "targetGraduate": "Fedele Luisi"}, headers=ADMIN)
     assert r.status_code == 201
     w = r.json()
     assert w["authorName"] == "Amico/a" and w["message"] == "Auguri!" and w["heartCount"] == 1
-    assert client.post(f"/api/wishes/{w['id']}/heart").json()["heartCount"] == 2
-    assert client.post("/api/wishes", json={"message": "   "}).status_code == 422
-    assert client.get("/api/wishes").json()[0]["id"] == w["id"]  # ordinamento: più recente per primo
+    assert client.post(f"/api/wishes/{w['id']}/heart", headers=ADMIN).json()["heartCount"] == 2
+    assert client.post("/api/wishes", json={"message": "   "}, headers=ADMIN).status_code == 422
+    assert client.get("/api/wishes", headers=ADMIN).json()[0]["id"] == w["id"]  # ordinamento: più recente per primo
     assert client.delete(f"/api/wishes/{w['id']}").status_code == 403
     assert client.delete(f"/api/wishes/{w['id']}", headers=ADMIN).status_code == 204
+
+
+def test_wishes_and_photos_only_for_registered_guests_and_roles(tmp_path):
+    with make_client(tmp_path, graduate_tokens={"luisi": "grad-luisi"}) as c:
+        anna = guest_headers(c, "Anna Bianchi")
+        nope = guest_headers(c, "Ugo Assente", rsvp_status="DECLINED")  # anche chi non viene
+        # senza registrazione: niente lettura, niente pubblicazione, niente cuori/like; snapshot senza foto e auguri
+        for h in ({}, {"X-Client-Id": "tel"}, {"X-Guest-Token": "sbagliato"}, {"X-Graduate-Token": "sbagliato"}):
+            assert c.get("/api/wishes", headers=h).status_code == 401, h
+            assert c.get("/api/photos", headers=h).status_code == 401, h
+            assert c.post("/api/wishes", json={"message": "ciao"}, headers=h).status_code == 401, h
+            assert c.post("/api/wishes/1/heart", headers=h).status_code == 401, h
+            assert c.post("/api/photos/1/like", headers=h).status_code == 401, h
+            snap = c.get("/api/snapshot", headers=h).json()
+            assert snap["wishes"] == [] and snap["photos"] == [] and snap["canSeeMemories"] is False, h
+            assert c.get("/api/state", headers=h).json()["canSeeMemories"] is False, h
+        assert "link personale" in c.get("/api/wishes").json()["detail"]
+        # invitati registrati (qualunque RSVP) e ruoli: vedono e pubblicano
+        for h in (anna, nope, ADMIN, TREASURER, {"X-Graduate-Token": "grad-luisi"}):
+            assert len(c.get("/api/wishes", headers=h).json()) >= 10, h
+            assert len(c.get("/api/photos", headers=h).json()) == 3, h
+            snap = c.get("/api/snapshot", headers=h).json()
+            assert snap["canSeeMemories"] is True and len(snap["wishes"]) >= 10 and len(snap["photos"]) == 3, h
+            assert c.get("/api/state", headers=h).json()["canSeeMemories"] is True, h
+        # l'invitato firma col nome del profilo, non con quello che scrive
+        w = c.post("/api/wishes", json={"authorName": "Il Rettore", "message": "Bravi!"}, headers=anna).json()
+        assert w["authorName"] == "Anna Bianchi"
+        assert c.post(f"/api/wishes/{w['id']}/heart", headers=nope).json()["heartCount"] == 2
+        assert c.post("/api/wishes", json={"authorName": "Zia", "message": "Evviva"}, headers=TREASURER).json()["authorName"] == "Zia"
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), (0, 90, 200)).save(buf, "PNG")
+        p = c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}, data={"authorName": "Altro nome"}, headers=anna)
+        assert p.status_code == 201 and p.json()["authorName"] == "Anna Bianchi"
+        assert c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}).status_code == 401
 
 
 def test_gift_targets_hide_amounts_and_pool_is_private(client):
@@ -116,7 +150,7 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
     assert [t["id"] for t in targets][:2] == ["luisi", "carlone"] and "gruppo" not in [t["id"] for t in targets]
     for t in targets:
         assert "collectedAmount" not in t and "targetAmount" not in t
-        assert t["iban"] and t["paypalMeUrl"] and "satispayUrl" in t  # Satispay facoltativo (es. Regina non ce l'ha)
+        assert t["iban"] and "paypalMeUrl" in t and "satispayUrl" in t  # PayPal e Satispay facoltativi (es. Totaro, Regina)
     collector = client.get("/api/gifts/collector").json()
     assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
     assert "Satispay" not in collector["paymentMethods"]
@@ -150,6 +184,8 @@ def test_pool_equal_split(client):
     r = client.post("/api/gifts/pool", json={"donorName": "Cugina", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "PayPal"})
     assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Akilesh Bhunjun"
     assert client.post("/api/gifts/pool", json={"donorName": "X", "totalAmount": 45, "collectorId": "nessuno"}).status_code == 404
+    # Aki non accetta contanti
+    assert client.post("/api/gifts/pool", json={"donorName": "Y", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "Contanti"}).status_code == 422
 
     # solo alcuni neo-specialisti (es. escludo me stesso)
     r = client.post("/api/gifts/pool", json={"donorName": "Fedele", "totalAmount": 80, "graduateIds": ["carlone", "totaro"]})
@@ -212,16 +248,16 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert s["contributions"] == 3 and s["pending"] == 2 and s["receivedAmount"] == 180
         luisi = next(g for g in s["byGraduate"] if g["graduateId"] == "luisi")
         assert luisi == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 80, "receivedAmount": 20, "contributions": 3}
-        assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 150, "Contanti": 90}
+        assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 240}
         assert board["contributions"][0]["donorName"] == "Amici del corso"  # la più recente per prima
-        # sezioni per cassiere: Paolo ha 2 quote (330 €), Aki 1 (90 € in contanti)
+        # sezioni per cassiere: Paolo ha 2 quote (330 €), Aki 1 (90 € via PayPal)
         assert [x["id"] for x in board["collectors"]] == ["roberto", "aki"]
         by_c = {x["collectorId"]: x for x in s["byCollector"]}
         assert by_c["roberto"]["totalAmount"] == 330 and by_c["aki"]["totalAmount"] == 90 and by_c["aki"]["contributions"] == 1
         assert next(g for g in by_c["aki"]["byGraduate"] if g["graduateId"] == "luisi")["amount"] == 10
 
         # il cassiere segna come ricevuta la quota PayPal
-        paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal")
+        paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal" and k["collectorId"] == "roberto")
         v0 = c.get("/api/state").json()["version"]
         r = c.patch(f"/api/gifts/pool/{paypal['id']}/status", json={"status": "RECEIVED"}, headers=TREASURER)
         assert r.status_code == 200 and r.json()["status"] == "RECEIVED" and r.json()["receivedAt"]
@@ -307,6 +343,7 @@ def test_photo_upload_resizes_and_serves(client):
         "/api/photos",
         files={"file": ("big.png", buf.getvalue(), "image/png")},
         data={"authorName": "Chiara", "caption": "Prova"},
+        headers=ADMIN,
     )
     assert r.status_code == 201, r.text
     p = r.json()
@@ -316,8 +353,8 @@ def test_photo_upload_resizes_and_serves(client):
     assert served.status_code == 200
     w, h = Image.open(io.BytesIO(served.content)).size
     assert max(w, h) == 1600
-    assert client.post(f"/api/photos/{p['id']}/like").json()["likesCount"] == 2
-    bad = client.post("/api/photos", files={"file": ("x.txt", b"non immagine", "text/plain")})
+    assert client.post(f"/api/photos/{p['id']}/like", headers=ADMIN).json()["likesCount"] == 2
+    bad = client.post("/api/photos", files={"file": ("x.txt", b"non immagine", "text/plain")}, headers=ADMIN)
     assert bad.status_code == 400
 
 
@@ -592,7 +629,7 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
     con.commit(); con.close()
 
     assert ensure_schema(make_engine(str(path))) == [
-        "+event_notifications.scheduled_at", "+gift_targets.email", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
+        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
     ]  # gift_pool_contributions non esiste ancora: create_all la crea già con le colonne del cassiere
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:
@@ -613,8 +650,8 @@ def test_iban_validation_detects_placeholders():
         data = json.load(f)
     issues = placeholder_gift_issues(data)
     fake_targets = [t for t in data["giftTargets"] if not iban_is_valid(t["iban"])]
-    assert len(issues) == len(fake_targets) + 2  # i regali con IBAN segnaposto, due cassieri compresi
-    assert issues[0].startswith("cassiere 'roberto'") and issues[1].startswith("cassiere 'aki'")
+    assert len(issues) == len(fake_targets) + 1  # i regali con IBAN segnaposto, più il cassiere Roberto (Aki ha l'IBAN vero)
+    assert issues[0].startswith("cassiere 'roberto'") and not any(i.startswith("cassiere 'aki'") for i in issues)
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     for c in data["giftCollectors"]:
         c["iban"] = "IT60 X054 2811 1010 0000 0123 456"

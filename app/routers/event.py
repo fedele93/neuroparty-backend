@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import lists_allowed, roles_for
+from ..auth import lists_allowed, memories_access, roles_for
 from ..deps import base_url_for, get_db
 from ..models import (
     BusBooking,
@@ -55,6 +55,8 @@ def state(request: Request, db: Session = Depends(get_db)):
         "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.treasurer_tokens),
         # con i token inviati in questa chiamata, il client vede gli elenchi completi di invitati e navetta?
         "canSeeLists": lists_allowed(request),
+        # foto e auguri: solo invitati registrati (X-Guest-Token) e ruoli
+        "canSeeMemories": memories_access(request, db)[0],
         # ruoli sbloccati dai token di questa chiamata (guida del ruolo nella PWA, token sbagliati)
         "roles": roles_for(request),
         "pushSubscriptions": subscription_count(db),
@@ -65,9 +67,11 @@ def state(request: Request, db: Session = Depends(get_db)):
 def snapshot(request: Request, db: Session = Depends(get_db)):
     """Tutte le collezioni pubbliche in una sola risposta: usato dall'app Android per sincronizzare Room.
     Invitati e prenotazioni: completi solo con un token (organizzatore, festeggiato, cassiere),
-    altrimenti solo i propri record (X-Client-Id o X-Guest-Token)."""
+    altrimenti solo i propri record (X-Client-Id o X-Guest-Token). Foto e auguri: solo per gli invitati
+    registrati e i ruoli, agli altri arrivano liste vuote (canSeeMemories=false)."""
     base = base_url_for(request)
     lists = lists_allowed(request)
+    memories, _ = memories_access(request, db)
     client_id = request.headers.get("x-client-id") or None
     token = (request.headers.get("x-guest-token") or "").strip()
     me = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
@@ -81,10 +85,11 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
         "serverTime": now_ms(),
         "event": public_event_info(request.app.state.event_data),
         "canSeeLists": lists,
+        "canSeeMemories": memories,
         "guests": [g.to_dict() for g in guests],
         "busBookings": [b.to_dict() for b in bookings],
-        "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()],
-        "photos": [p.to_dict(base) for p in db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()],
+        "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()] if memories else [],
+        "photos": [p.to_dict(base) for p in db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()] if memories else [],
         # niente importi né elenco delle quote: le quote uniche le vede solo il cassiere (GET /api/gifts/pool)
         "giftTargets": [t.to_dict() for t in db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all()],
         "notifications": [

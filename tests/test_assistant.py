@@ -97,12 +97,15 @@ def test_execute_tool_rsvp_wish_and_errors(bot):
         assert execute_tool("find_guest", {"name": "pina"}, request, db, "dev-1")["count"] == 1  # proprio record
         assert execute_tool("find_guest", {"name": "pina"}, request, db, None)["count"] == 0  # elenco riservato
         out = execute_tool("post_wish", {"authorName": "Zia Pina", "message": "Bravi tutti!"}, request, db, None)
+        assert "error" in out and out["navigate"] == "rsvp"  # solo chi è registrato pubblica auguri
+        admin_request = Request({**scope, "headers": [(b"x-admin-token", ADMIN["X-Admin-Token"].encode())]})
+        out = execute_tool("post_wish", {"authorName": "Zia Pina", "message": "Bravi tutti!"}, admin_request, db, None)
         assert out["navigate"] == "wishes" and out["wish"]["targetGraduate"] == "Tutti i Laureandi"
         assert "error" in execute_tool("book_bus", {"passengerName": "Troppi", "seatsCount": 60}, request, db, None)
         assert "error" in execute_tool("book_bus", {"passengerName": "", "seatsCount": 1}, request, db, None)
         assert "error" in execute_tool("open_section", {"section": "boh"}, request, db, None)
         assert "error" in execute_tool("set_rsvp", {"fullName": "", "status": "CONFIRMED"}, request, db, None)
-    assert len(bot.get("/api/wishes").json()) == 11
+    assert len(bot.get("/api/wishes", headers=ADMIN).json()) == 11
 
 
 def test_system_prompt_contains_event_facts(bot):

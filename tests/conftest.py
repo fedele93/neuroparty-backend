@@ -23,6 +23,7 @@ def make_client(
     treasurer_token="cassa-test",  # i test che vogliono "nessun cassiere" passano treasurer_token=""
     treasurer_tokens=None,
     graduate_tokens=None,
+    graduate_emails=None,
     assistant_fake=False,
     mistral_api_key="",
     webhook_url="",
@@ -41,6 +42,7 @@ def make_client(
         treasurer_token=treasurer_token,
         treasurer_tokens=treasurer_tokens or {},
         graduate_tokens=graduate_tokens or {},
+        graduate_emails=graduate_emails or {},
         assistant_fake=assistant_fake,
         mistral_api_key=mistral_api_key,
         n8n_webhook_url=webhook_url,
@@ -70,4 +72,15 @@ def empty_client(tmp_path):
 
 
 ADMIN = {"X-Admin-Token": "segreto-test"}
+
+
+def guest_headers(client, full_name="Ospite Registrato", rsvp_status="CONFIRMED", token=None) -> dict:
+    """Invitato registrato (come se avesse aperto il link personale): header X-Guest-Token."""
+    from app.models import Guest
+
+    token = token or "tok-" + full_name.lower().replace(" ", "-")
+    with client.app.state.session_factory() as db:
+        db.add(Guest(full_name=full_name, rsvp_status=rsvp_status, guests_count=1, email=f"{token}@example.org", access_token=token))
+        db.commit()
+    return {"X-Guest-Token": token}
 TREASURER = {"X-Treasurer-Token": "cassa-test"}

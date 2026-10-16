@@ -2,25 +2,26 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin
+from ..auth import require_admin, require_member
 from ..deps import get_db
-from ..models import Wish
+from ..models import Guest, Wish
 from ..schemas import WishIn
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/wishes", tags=["auguri"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_member)])
 def list_wishes(db: Session = Depends(get_db)):
     rows = db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()
     return [w.to_dict() for w in rows]
 
 
 @router.post("", status_code=201)
-def create_wish(body: WishIn, request: Request, db: Session = Depends(get_db)):
+def create_wish(body: WishIn, request: Request, db: Session = Depends(get_db), member: Guest | None = Depends(require_member)):
+    """Nuovo augurio. Per gli invitati registrati l'autore è il nome del profilo (nessuno firma per un altro)."""
     wish = Wish(
-        author_name=body.authorName,
+        author_name=member.full_name if member is not None else body.authorName,
         target_graduate=body.targetGraduate or "Tutti i Laureandi",
         message=body.message,
         emoji_badge=body.emojiBadge or "🎓",
@@ -51,7 +52,7 @@ def notify_graduate(request: Request, db: Session, wish: Wish) -> None:
             return
 
 
-@router.post("/{wish_id}/heart")
+@router.post("/{wish_id}/heart", dependencies=[Depends(require_member)])
 def heart_wish(wish_id: int, db: Session = Depends(get_db)):
     wish = db.get(Wish, wish_id)
     if wish is None:

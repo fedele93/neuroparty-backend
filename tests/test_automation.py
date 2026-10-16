@@ -39,7 +39,7 @@ def test_webhooks_disabled_by_default(client):
     assert {e["name"] for e in st["events"]} >= {"guest.created", "bus.booked", "notification.published", "test"}
     assert client.post("/api/automation/webhook-test", headers=ADMIN).status_code == 503
     # senza URL non si tenta nessuna chiamata (contatore "skipped")
-    client.post("/api/wishes", json={"message": "Auguri!"})
+    client.post("/api/wishes", json={"message": "Auguri!"}, headers=ADMIN)
     assert client.app.state.webhooks.stats == {"sent": 0, "failed": 0, "skipped": 1}
 
 
@@ -53,7 +53,7 @@ def test_webhook_events_and_signature(tmp_path):
         # navetta, augurio, quota regalo, notifica immediata
         b = c.post("/api/bus/bookings", json={"passengerName": "Anna", "seatsCount": 3}, headers={"X-Client-Id": "a"}).json()
         c.delete(f"/api/bus/bookings/{b['id']}", headers={"X-Client-Id": "a"})
-        c.post("/api/wishes", json={"authorName": "Zia", "message": "Bravi!"})
+        c.post("/api/wishes", json={"authorName": "Zia", "message": "Bravi!"}, headers=ADMIN)
         c.post("/api/gifts/pool", json={"donorName": "Nonna", "totalAmount": 90, "paymentMethod": "IBAN"})
         c.post("/api/notifications", json={"title": "Ciao", "message": "a tutti"}, headers=ADMIN)
 
@@ -103,7 +103,7 @@ def test_webhook_scheduled_notification_and_scheduler(tmp_path):
 def test_webhook_event_filter(tmp_path):
     n8n = FakeN8n()
     with make_client(tmp_path, webhook_url=N8N_URL, webhook_events="guest.*, bus.booked", webhook_handler=n8n) as c:
-        c.post("/api/wishes", json={"message": "ignorato"})
+        c.post("/api/wishes", json={"message": "ignorato"}, headers=ADMIN)
         c.post("/api/guests", json={"fullName": "Lia"})
         c.post("/api/bus/bookings", json={"passengerName": "Ugo"})
         assert n8n.events == ["guest.created", "bus.booked"]
@@ -182,6 +182,6 @@ def test_report_json_text_html(client):
 
 
 def test_report_html_escapes_user_content(client):
-    client.post("/api/wishes", json={"authorName": "<script>alert(1)</script>", "message": "ciao"})
+    client.post("/api/wishes", json={"authorName": "<script>alert(1)</script>", "message": "ciao"}, headers=ADMIN)
     page = client.get("/api/automation/report.html", headers=ADMIN).text
     assert "<script>" not in page and "&lt;script&gt;" in page

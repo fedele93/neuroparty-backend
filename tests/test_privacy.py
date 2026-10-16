@@ -13,7 +13,8 @@ def test_lists_are_reserved_to_roles_and_own_records_only(tmp_path):
         assert c.get("/api/guests/summary").status_code == 403
         snap = c.get("/api/snapshot").json()
         assert snap["guests"] == [] and snap["busBookings"] == [] and snap["canSeeLists"] is False
-        assert len(snap["wishes"]) > 0 and len(snap["giftTargets"]) == 9  # il resto resta pubblico
+        assert snap["wishes"] == [] and snap["photos"] == [] and snap["canSeeMemories"] is False  # foto e auguri: solo registrati
+        assert len(snap["giftTargets"]) == 9  # il resto resta pubblico
         assert c.get("/api/state").json()["canSeeLists"] is False
         # un dispositivo vede i record che ha creato (invitato e prenotazione)
         g = c.post("/api/guests", json={"fullName": "Solo Io", "guestsCount": 2}, headers=DEV).json()
@@ -58,14 +59,14 @@ def test_pool_amounts_only_for_treasurers(tmp_path):
 
 def test_admin_can_delete_photos_wishes_and_clear_history(tmp_path):
     with make_client(tmp_path) as c:
-        wish = c.get("/api/wishes").json()[0]
-        photo = c.get("/api/photos").json()[0]
+        wish = c.get("/api/wishes", headers=ADMIN).json()[0]
+        photo = c.get("/api/photos", headers=ADMIN).json()[0]
         assert c.delete(f"/api/wishes/{wish['id']}").status_code == 403
         assert c.delete(f"/api/photos/{photo['id']}").status_code == 403
         assert c.delete(f"/api/wishes/{wish['id']}", headers=ADMIN).status_code == 204
         assert c.delete(f"/api/photos/{photo['id']}", headers=ADMIN).status_code == 204
-        assert wish["id"] not in [w["id"] for w in c.get("/api/wishes").json()]
-        assert photo["id"] not in [p["id"] for p in c.get("/api/photos").json()]
+        assert wish["id"] not in [w["id"] for w in c.get("/api/wishes", headers=ADMIN).json()]
+        assert photo["id"] not in [p["id"] for p in c.get("/api/photos", headers=ADMIN).json()]
         # cronologia notifiche: svuotata dall'organizzatore, le programmate restano
         future = c.get("/api/state").json()["serverTime"] + 3_600_000
         c.post("/api/notifications", json={"title": "Dopo", "message": "x", "sendAt": future}, headers=ADMIN)
