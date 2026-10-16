@@ -15,7 +15,7 @@ def test_health_and_event(client):
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
-    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
+    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal"]  # Aki: niente contanti
 
 
 def test_demo_seed_matches_json(client):
@@ -150,6 +150,8 @@ def test_pool_equal_split(client):
     r = client.post("/api/gifts/pool", json={"donorName": "Cugina", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "PayPal"})
     assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Akilesh Bhunjun"
     assert client.post("/api/gifts/pool", json={"donorName": "X", "totalAmount": 45, "collectorId": "nessuno"}).status_code == 404
+    # Aki non accetta contanti
+    assert client.post("/api/gifts/pool", json={"donorName": "Y", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "Contanti"}).status_code == 422
 
     # solo alcuni neo-specialisti (es. escludo me stesso)
     r = client.post("/api/gifts/pool", json={"donorName": "Fedele", "totalAmount": 80, "graduateIds": ["carlone", "totaro"]})
@@ -212,16 +214,16 @@ def test_pool_treasurer_dashboard_and_csv(tmp_path):
         assert s["contributions"] == 3 and s["pending"] == 2 and s["receivedAmount"] == 180
         luisi = next(g for g in s["byGraduate"] if g["graduateId"] == "luisi")
         assert luisi == {"graduateId": "luisi", "graduateName": "Dott. Fedele Luisi", "amount": 80, "receivedAmount": 20, "contributions": 3}
-        assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 150, "Contanti": 90}
+        assert {m["paymentMethod"]: m["amount"] for m in s["byMethod"]} == {"IBAN": 180, "PayPal": 240}
         assert board["contributions"][0]["donorName"] == "Amici del corso"  # la più recente per prima
-        # sezioni per cassiere: Paolo ha 2 quote (330 €), Aki 1 (90 € in contanti)
+        # sezioni per cassiere: Paolo ha 2 quote (330 €), Aki 1 (90 € via PayPal)
         assert [x["id"] for x in board["collectors"]] == ["roberto", "aki"]
         by_c = {x["collectorId"]: x for x in s["byCollector"]}
         assert by_c["roberto"]["totalAmount"] == 330 and by_c["aki"]["totalAmount"] == 90 and by_c["aki"]["contributions"] == 1
         assert next(g for g in by_c["aki"]["byGraduate"] if g["graduateId"] == "luisi")["amount"] == 10
 
         # il cassiere segna come ricevuta la quota PayPal
-        paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal")
+        paypal = next(k for k in board["contributions"] if k["paymentMethod"] == "PayPal" and k["collectorId"] == "roberto")
         v0 = c.get("/api/state").json()["version"]
         r = c.patch(f"/api/gifts/pool/{paypal['id']}/status", json={"status": "RECEIVED"}, headers=TREASURER)
         assert r.status_code == 200 and r.json()["status"] == "RECEIVED" and r.json()["receivedAt"]
@@ -613,8 +615,8 @@ def test_iban_validation_detects_placeholders():
         data = json.load(f)
     issues = placeholder_gift_issues(data)
     fake_targets = [t for t in data["giftTargets"] if not iban_is_valid(t["iban"])]
-    assert len(issues) == len(fake_targets) + 2  # i regali con IBAN segnaposto, due cassieri compresi
-    assert issues[0].startswith("cassiere 'roberto'") and issues[1].startswith("cassiere 'aki'")
+    assert len(issues) == len(fake_targets) + 1  # i regali con IBAN segnaposto, più il cassiere Roberto (Aki ha l'IBAN vero)
+    assert issues[0].startswith("cassiere 'roberto'") and not any(i.startswith("cassiere 'aki'") for i in issues)
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     for c in data["giftCollectors"]:
         c["iban"] = "IT60 X054 2811 1010 0000 0123 456"

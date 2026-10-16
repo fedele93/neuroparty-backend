@@ -39,7 +39,7 @@ def test_pool_email_confirmation_note_batch_and_reminder(tmp_path):
         # email non valida -> 422; senza email nessuna mail
         bad = {**body, "email": "non-una-mail"}
         assert c.post("/api/gifts/pool", json=bad, headers={"X-Client-Id": "x"}).status_code == 422
-        r2 = c.post("/api/gifts/pool", json={**body, "email": "", "donorName": "Bruno", "collectorId": "aki", "paymentMethod": "Contanti"}, headers={"X-Client-Id": "tel-bruno"})
+        r2 = c.post("/api/gifts/pool", json={**body, "email": "", "donorName": "Bruno", "collectorId": "aki", "paymentMethod": "PayPal"}, headers={"X-Client-Id": "tel-bruno"})
         assert r2.status_code == 201 and "mail" not in r2.json() and len(_mails(n8n)) == 1
 
         # nota del cassiere: solo nel proprio ambito
