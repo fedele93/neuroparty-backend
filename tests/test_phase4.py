@@ -138,3 +138,17 @@ def test_graduate_without_tokens_is_503(tmp_path):
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 503
     with make_client(tmp_path / "b") as c:  # con ADMIN_TOKEN ma senza token festeggiati: 403, non 503
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 403
+
+
+def test_graduate_email_from_env_gets_wish_mail(tmp_path):
+    """GRADUATE_EMAIL_<ID>: email privata del festeggiato fuori dal JSON pubblico."""
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n, graduate_emails={"totaro": "dalila@example.org"}) as c:
+        from app.models import GiftTarget
+        with c.app.state.session_factory() as db:
+            assert db.get(GiftTarget, "totaro").email == "dalila@example.org"
+        assert "email" not in next(t for t in c.get("/api/gifts/targets").json() if t["id"] == "totaro")
+        r = c.post("/api/wishes", json={"authorName": "Zia", "targetGraduate": "Dalila Totaro", "message": "Brava Dalila!"}, headers=ADMIN)
+        assert r.status_code == 201
+        mails = _mails(n8n)
+        assert len(mails) == 1 and mails[0]["kind"] == "wish_received" and mails[0]["to"] == "dalila@example.org"

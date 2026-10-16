@@ -357,8 +357,9 @@ conferma con IBAN e causale e, se la quota resta in attesa, un promemoria (dal c
 workflow n8n settimanale); il cassiere ha i pulsanti "contatta", gli appunti per ogni quota e
 può segnare più quote ricevute in una volta.
 
-Ogni neo-specialista può avere in `giftTargets` un campo privato `email` (mai esposto dalle API):
-riceve un'email a ogni augurio che lo riguarda. Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
+Ogni neo-specialista può avere un'email privata (mai esposta dalle API): riceve un'email a ogni
+augurio che lo riguarda. Va nel `.env` come `GRADUATE_EMAIL_<ID>` (es. `GRADUATE_EMAIL_TOTARO`),
+non nel campo `email` di `giftTargets`: il JSON è pubblico (repository e PWA). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
 nella PWA la propria area 🎓 (⚙️ Impostazioni → token festeggiato).
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti

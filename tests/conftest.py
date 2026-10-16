@@ -23,6 +23,7 @@ def make_client(
     treasurer_token="cassa-test",  # i test che vogliono "nessun cassiere" passano treasurer_token=""
     treasurer_tokens=None,
     graduate_tokens=None,
+    graduate_emails=None,
     assistant_fake=False,
     mistral_api_key="",
     webhook_url="",
@@ -41,6 +42,7 @@ def make_client(
         treasurer_token=treasurer_token,
         treasurer_tokens=treasurer_tokens or {},
         graduate_tokens=graduate_tokens or {},
+        graduate_emails=graduate_emails or {},
         assistant_fake=assistant_fake,
         mistral_api_key=mistral_api_key,
         n8n_webhook_url=webhook_url,

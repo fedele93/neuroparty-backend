@@ -150,7 +150,7 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
     assert [t["id"] for t in targets][:2] == ["luisi", "carlone"] and "gruppo" not in [t["id"] for t in targets]
     for t in targets:
         assert "collectedAmount" not in t and "targetAmount" not in t
-        assert t["iban"] and t["paypalMeUrl"] and "satispayUrl" in t  # Satispay facoltativo (es. Regina non ce l'ha)
+        assert t["iban"] and "paypalMeUrl" in t and "satispayUrl" in t  # PayPal e Satispay facoltativi (es. Totaro, Regina)
     collector = client.get("/api/gifts/collector").json()
     assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
     assert "Satispay" not in collector["paymentMethods"]

@@ -161,6 +161,20 @@ def sync_gift_targets(db: Session, data: dict, include_demo: bool, update_texts:
     return {"added": added, "updated": updated, "removed": removed}
 
 
+def apply_graduate_emails(db: Session, emails: dict) -> int:
+    """Email private dei festeggiati dal .env (GRADUATE_EMAIL_<ID>): prevalgono sul campo "email" del JSON.
+    Non cambia la versione dei dati: l'email non esce dalle API pubbliche. Ritorna i regali aggiornati."""
+    updated = 0
+    for graduate_id, email in emails.items():
+        target = db.get(GiftTarget, graduate_id)
+        if target is not None and target.email != email:
+            target.email = email
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
 def sync_assistant_avatars(db: Session, data: dict) -> int:
     """Un avatar per ogni neo-specialista (stessi id dei regali). I valori iniziali (persona,
     abilitato) vengono dal blocco "assistant.avatars" del JSON e valgono solo al primo inserimento:

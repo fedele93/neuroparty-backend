@@ -32,6 +32,11 @@ class Settings:
     graduate_tokens: dict = field(default_factory=lambda: {
         k[len("GRADUATE_TOKEN_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("GRADUATE_TOKEN_") and v.strip()
     })
+    # Email privata per singolo festeggiato: GRADUATE_EMAIL_<ID> (es. GRADUATE_EMAIL_TOTARO). Riceve un'email
+    # a ogni augurio per lui. Sta nel .env e non nel JSON, che è pubblico (repository e PWA).
+    graduate_emails: dict = field(default_factory=lambda: {
+        k[len("GRADUATE_EMAIL_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("GRADUATE_EMAIL_") and v.strip()
+    })
     # Se true, al riavvio aggiorna anche testi/IBAN/link dei regali già in DB a partire dal JSON.
     # Di default aggiunge solo i regali mancanti.
     gift_sync_update_texts: bool = field(default_factory=lambda: _bool(os.environ.get("GIFT_SYNC_UPDATE_TEXTS"), False))
