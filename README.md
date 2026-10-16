@@ -359,7 +359,11 @@ può segnare più quote ricevute in una volta.
 
 Ogni neo-specialista può avere un'email privata (mai esposta dalle API): riceve un'email a ogni
 augurio che lo riguarda. Va nel `.env` come `GRADUATE_EMAIL_<ID>` (es. `GRADUATE_EMAIL_TOTARO`),
-non nel campo `email` di `giftTargets`: il JSON è pubblico (repository e PWA). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
+non nel campo `email` di `giftTargets`: il JSON è pubblico (repository e PWA).
+Con l'email configurata il festeggiato entra anche **senza token**: in ⚙️ → "Sono un festeggiato"
+scrive la sua email (`POST /api/graduate/request-link`) e riceve il link
+`https://<app>/#festeggiato=<token>`, che apre la sua area e vale come `GRADUATE_TOKEN_<ID>`
+(il token è salvato nel database ed è sempre lo stesso; la risposta non rivela se l'email esiste). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
 nella PWA la propria area 🎓 (⚙️ Impostazioni → token festeggiato).
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti

@@ -629,7 +629,7 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
     con.commit(); con.close()
 
     assert ensure_schema(make_engine(str(path))) == [
-        "+event_notifications.scheduled_at", "+gift_targets.email", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
+        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
     ]  # gift_pool_contributions non esiste ancora: create_all la crea già con le colonne del cassiere
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:

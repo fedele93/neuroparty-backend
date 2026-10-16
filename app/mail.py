@@ -27,6 +27,7 @@ RSVP_LABELS = {"CONFIRMED": "Confermata", "PENDING": "In attesa di conferma", "D
 
 KINDS = {
     "access_link": "Link personale",
+    "graduate_link": "Link del festeggiato",
     "rsvp_confirmation": "Conferma partecipazione",
     "menu_reminder": "Promemoria menu",
     "bus_confirmation": "Conferma navetta",
@@ -114,6 +115,28 @@ def access_link_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, st
         + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
     )
     return subject, text, _layout("Il tuo link personale", body, "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.")
+
+
+def graduate_link_mail(target, link: str, event_data: dict) -> tuple[str, str, str]:
+    """Link personale del festeggiato: apre l'area 🎓 (chi viene, auguri, coordinate, avatar)."""
+    ev = event_summary(event_data)
+    name = first_name(target.short_name)
+    subject = f"La tua area festeggiato per {ev['title']}"
+    text = (
+        f"Ciao {name},\n\n"
+        "ecco il tuo link personale da festeggiato: apre la tua area nell'app, con chi viene alla festa, "
+        "gli auguri che ti scrivono, le coordinate per i regali e il tuo avatar dell'assistente.\n\n"
+        f"{link}\n\n"
+        "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.\n\nA presto!"
+    )
+    body = (
+        f"<p>Ciao {html_lib.escape(name)},</p>"
+        "<p>ecco il tuo link personale da festeggiato: apre la tua area nell'app, con chi viene alla festa, "
+        "gli auguri che ti scrivono, le coordinate per i regali e il tuo avatar dell'assistente.</p>"
+        + _button(link, "Apri la mia area 🎓")
+        + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+    )
+    return subject, text, _layout("La tua area festeggiato", body, "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.")
 
 
 def rsvp_confirmation_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, str, str]:

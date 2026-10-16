@@ -1,17 +1,40 @@
-"""Area festeggiato (GRADUATE_TOKEN_<ID> oppure ADMIN_TOKEN): chi viene, auguri ricevuti,
+"""Area festeggiato (GRADUATE_TOKEN_<ID>, link personale via email oppure ADMIN_TOKEN): chi viene, auguri ricevuti,
 le proprie coordinate di pagamento come le vedono gli invitati, il proprio avatar.
 Nessuna cifra delle quote: le vedono solo cassieri e organizzatori."""
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_graduate
-from ..deps import get_db
+from ..deps import base_url_for, get_db
+from ..mail import graduate_link_mail
 from ..models import AssistantAvatar, BusBooking, GiftTarget, Guest, Wish
 from ..routers.bus import bus_summary
 from ..routers.guests import guests_summary
+from ..schemas import ProfileLinkRequest
 
 router = APIRouter(prefix="/api/graduate", tags=["festeggiato"])
+
+
+@router.post("/request-link", status_code=202)
+def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depends(get_db)):
+    """Manda al festeggiato il link personale (https://<app>/#festeggiato=<token>) se l'email è la sua
+    (GRADUATE_EMAIL_<ID> nel .env, oppure il campo email del JSON). Il link vale come GRADUATE_TOKEN_<ID>
+    e resta lo stesso a ogni richiesta. La risposta non rivela se l'email è di un festeggiato."""
+    mailer = request.app.state.mailer
+    if not mailer.enabled:
+        return {"queued": False, "message": "Il server non può inviare email in questo momento: chiedi il token agli organizzatori."}
+    target = db.scalars(select(GiftTarget).where(func.lower(GiftTarget.email) == body.email)).first()
+    if target is not None:
+        if not target.access_token:
+            target.access_token = secrets.token_urlsafe(24)
+            db.commit()
+        link = f"{base_url_for(request)}/#festeggiato={target.access_token}"
+        subject, text, html = graduate_link_mail(target, link, request.app.state.event_data)
+        mailer.send("graduate_link", target.email, subject, text, html)
+    return {"queued": True, "message": "Se l'email è quella di un festeggiato riceverai il link fra poco: controlla la posta (anche lo spam)."}
 
 
 @router.get("/me")
