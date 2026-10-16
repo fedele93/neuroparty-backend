@@ -4,7 +4,7 @@ import re
 
 from PIL import Image
 
-from conftest import ADMIN, SEED, TREASURER, make_client
+from conftest import ADMIN, SEED, TREASURER, guest_headers, make_client
 
 
 def test_health_and_event(client):
@@ -100,15 +100,49 @@ def test_bus_capacity(client):
 
 
 def test_wishes(client):
-    r = client.post("/api/wishes", json={"authorName": "", "message": " Auguri! ", "targetGraduate": "Fedele Luisi"})
+    r = client.post("/api/wishes", json={"authorName": "", "message": " Auguri! ", "targetGraduate": "Fedele Luisi"}, headers=ADMIN)
     assert r.status_code == 201
     w = r.json()
     assert w["authorName"] == "Amico/a" and w["message"] == "Auguri!" and w["heartCount"] == 1
-    assert client.post(f"/api/wishes/{w['id']}/heart").json()["heartCount"] == 2
-    assert client.post("/api/wishes", json={"message": "   "}).status_code == 422
-    assert client.get("/api/wishes").json()[0]["id"] == w["id"]  # ordinamento: più recente per primo
+    assert client.post(f"/api/wishes/{w['id']}/heart", headers=ADMIN).json()["heartCount"] == 2
+    assert client.post("/api/wishes", json={"message": "   "}, headers=ADMIN).status_code == 422
+    assert client.get("/api/wishes", headers=ADMIN).json()[0]["id"] == w["id"]  # ordinamento: più recente per primo
     assert client.delete(f"/api/wishes/{w['id']}").status_code == 403
     assert client.delete(f"/api/wishes/{w['id']}", headers=ADMIN).status_code == 204
+
+
+def test_wishes_and_photos_only_for_registered_guests_and_roles(tmp_path):
+    with make_client(tmp_path, graduate_tokens={"luisi": "grad-luisi"}) as c:
+        anna = guest_headers(c, "Anna Bianchi")
+        nope = guest_headers(c, "Ugo Assente", rsvp_status="DECLINED")  # anche chi non viene
+        # senza registrazione: niente lettura, niente pubblicazione, niente cuori/like; snapshot senza foto e auguri
+        for h in ({}, {"X-Client-Id": "tel"}, {"X-Guest-Token": "sbagliato"}, {"X-Graduate-Token": "sbagliato"}):
+            assert c.get("/api/wishes", headers=h).status_code == 401, h
+            assert c.get("/api/photos", headers=h).status_code == 401, h
+            assert c.post("/api/wishes", json={"message": "ciao"}, headers=h).status_code == 401, h
+            assert c.post("/api/wishes/1/heart", headers=h).status_code == 401, h
+            assert c.post("/api/photos/1/like", headers=h).status_code == 401, h
+            snap = c.get("/api/snapshot", headers=h).json()
+            assert snap["wishes"] == [] and snap["photos"] == [] and snap["canSeeMemories"] is False, h
+            assert c.get("/api/state", headers=h).json()["canSeeMemories"] is False, h
+        assert "link personale" in c.get("/api/wishes").json()["detail"]
+        # invitati registrati (qualunque RSVP) e ruoli: vedono e pubblicano
+        for h in (anna, nope, ADMIN, TREASURER, {"X-Graduate-Token": "grad-luisi"}):
+            assert len(c.get("/api/wishes", headers=h).json()) >= 10, h
+            assert len(c.get("/api/photos", headers=h).json()) == 3, h
+            snap = c.get("/api/snapshot", headers=h).json()
+            assert snap["canSeeMemories"] is True and len(snap["wishes"]) >= 10 and len(snap["photos"]) == 3, h
+            assert c.get("/api/state", headers=h).json()["canSeeMemories"] is True, h
+        # l'invitato firma col nome del profilo, non con quello che scrive
+        w = c.post("/api/wishes", json={"authorName": "Il Rettore", "message": "Bravi!"}, headers=anna).json()
+        assert w["authorName"] == "Anna Bianchi"
+        assert c.post(f"/api/wishes/{w['id']}/heart", headers=nope).json()["heartCount"] == 2
+        assert c.post("/api/wishes", json={"authorName": "Zia", "message": "Evviva"}, headers=TREASURER).json()["authorName"] == "Zia"
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), (0, 90, 200)).save(buf, "PNG")
+        p = c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}, data={"authorName": "Altro nome"}, headers=anna)
+        assert p.status_code == 201 and p.json()["authorName"] == "Anna Bianchi"
+        assert c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}).status_code == 401
 
 
 def test_gift_targets_hide_amounts_and_pool_is_private(client):
@@ -309,6 +343,7 @@ def test_photo_upload_resizes_and_serves(client):
         "/api/photos",
         files={"file": ("big.png", buf.getvalue(), "image/png")},
         data={"authorName": "Chiara", "caption": "Prova"},
+        headers=ADMIN,
     )
     assert r.status_code == 201, r.text
     p = r.json()
@@ -318,8 +353,8 @@ def test_photo_upload_resizes_and_serves(client):
     assert served.status_code == 200
     w, h = Image.open(io.BytesIO(served.content)).size
     assert max(w, h) == 1600
-    assert client.post(f"/api/photos/{p['id']}/like").json()["likesCount"] == 2
-    bad = client.post("/api/photos", files={"file": ("x.txt", b"non immagine", "text/plain")})
+    assert client.post(f"/api/photos/{p['id']}/like", headers=ADMIN).json()["likesCount"] == 2
+    bad = client.post("/api/photos", files={"file": ("x.txt", b"non immagine", "text/plain")}, headers=ADMIN)
     assert bad.status_code == 400
 
 

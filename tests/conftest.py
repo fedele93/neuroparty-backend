@@ -70,4 +70,15 @@ def empty_client(tmp_path):
 
 
 ADMIN = {"X-Admin-Token": "segreto-test"}
+
+
+def guest_headers(client, full_name="Ospite Registrato", rsvp_status="CONFIRMED", token=None) -> dict:
+    """Invitato registrato (come se avesse aperto il link personale): header X-Guest-Token."""
+    from app.models import Guest
+
+    token = token or "tok-" + full_name.lower().replace(" ", "-")
+    with client.app.state.session_factory() as db:
+        db.add(Guest(full_name=full_name, rsvp_status=rsvp_status, guests_count=1, email=f"{token}@example.org", access_token=token))
+        db.commit()
+    return {"X-Guest-Token": token}
 TREASURER = {"X-Treasurer-Token": "cassa-test"}

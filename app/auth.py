@@ -13,10 +13,17 @@
   quote le vede SOLO chi ha questo token: il token organizzatore non basta.
 - Elenchi di invitati e prenotazioni navetta: completi solo con un token (organizzatore,
   festeggiato o cassiere); gli altri vedono soltanto i propri record (X-Client-Id o X-Guest-Token).
+- Foto e auguri: solo per chi è registrato (X-Guest-Token valido, cioè ha aperto il link personale
+  ricevuto via email, qualunque sia la sua risposta) o ha un token organizzatore, festeggiato o cassiere.
 """
 import secrets
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .deps import get_db
+from .models import Guest
 
 
 def get_client_id(x_client_id: str | None = Header(default=None)) -> str | None:
@@ -210,3 +217,27 @@ def roles_for(request: Request) -> dict:
         "treasurerIds": sorted(scope) if isinstance(scope, set) else [],
         "graduate": graduate,
     }
+
+
+# ---------------------------------------------------------------- foto e auguri (solo registrati)
+
+MEMBERS_ONLY = "Foto e auguri sono riservati agli invitati registrati: apri il link personale che ti abbiamo mandato via email"
+
+
+def memories_access(request: Request, db: Session) -> tuple[bool, Guest | None]:
+    """Chi può vedere e pubblicare foto e auguri: (accesso, invitato).
+    - invitato registrato: X-Guest-Token valido (ha aperto il link personale; vale anche chi ha detto "non vengo");
+    - organizzatore, festeggiato o cassiere: token del ruolo (gli stessi degli elenchi riservati)."""
+    token = (request.headers.get("x-guest-token") or "").strip()
+    guest = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
+    if guest is not None:
+        return True, guest
+    return lists_allowed(request), None
+
+
+def require_member(request: Request, db: Session = Depends(get_db)) -> Guest | None:
+    """Dipendenza degli endpoint di foto e auguri: 401 a chi non è registrato. Ritorna l'invitato (None per i ruoli)."""
+    allowed, guest = memories_access(request, db)
+    if not allowed:
+        raise HTTPException(status_code=401, detail=MEMBERS_ONLY)
+    return guest

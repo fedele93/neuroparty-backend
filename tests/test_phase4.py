@@ -85,7 +85,7 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
     n8n = FakeN8n()
     with _client(tmp_path, n8n) as c:
         # senza email privata del festeggiato nessuna mail per gli auguri
-        c.post("/api/wishes", json={"authorName": "Zia Pina", "targetGraduate": "Fedele Luisi", "message": "Bravo!"}, headers={"X-Client-Id": "z"})
+        c.post("/api/wishes", json={"authorName": "Zia Pina", "targetGraduate": "Fedele Luisi", "message": "Bravo!"}, headers={**ADMIN, "X-Client-Id": "z"})
         assert _mails(n8n) == []
         # email del festeggiato (privata: non esce dalle API pubbliche)
         from app.models import GiftTarget
@@ -95,12 +95,12 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
             db.commit()
         pub = next(t for t in c.get("/api/gifts/targets").json() if t["id"] == "luisi")
         assert "email" not in pub and pub["shortName"] == "Fedele Luisi"
-        r = c.post("/api/wishes", json={"authorName": "Nonna", "targetGraduate": "Fedele Luisi", "message": "Auguri dottore"}, headers={"X-Client-Id": "n"})
+        r = c.post("/api/wishes", json={"authorName": "Nonna", "targetGraduate": "Fedele Luisi", "message": "Auguri dottore"}, headers={**ADMIN, "X-Client-Id": "n"})
         assert r.status_code == 201
         mails = _mails(n8n)
         assert len(mails) == 1 and mails[0]["kind"] == "wish_received" and mails[0]["to"] == "fedele@example.org"
         assert "Nonna" in mails[0]["subject"] and "Auguri dottore" in mails[0]["text"]
-        c.post("/api/wishes", json={"authorName": "Tutti", "targetGraduate": "Tutti i Laureandi", "message": "Evviva"}, headers={"X-Client-Id": "t"})
+        c.post("/api/wishes", json={"authorName": "Tutti", "targetGraduate": "Tutti i Laureandi", "message": "Evviva"}, headers={**ADMIN, "X-Client-Id": "t"})
         assert len(_mails(n8n)) == 1
 
         # area festeggiato

@@ -7,9 +7,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin
+from ..auth import require_admin, require_member
 from ..deps import base_url_for, get_db
-from ..models import SharedPhoto
+from ..models import Guest, SharedPhoto
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/photos", tags=["foto"])
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/photos", tags=["foto"])
 MAX_SIDE = 1600  # le foto vengono ridimensionate per risparmiare spazio e banda
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_member)])
 def list_photos(request: Request, db: Session = Depends(get_db)):
     base = base_url_for(request)
     rows = db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()
@@ -31,7 +31,9 @@ async def upload_photo(
     authorName: str = Form(default="Invitato"),
     caption: str = Form(default=""),
     db: Session = Depends(get_db),
+    member: Guest | None = Depends(require_member),
 ):
+    """Nuova foto. Per gli invitati registrati l'autore è il nome del profilo."""
     settings = request.app.state.settings
     raw = await file.read()
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
@@ -48,7 +50,7 @@ async def upload_photo(
     img.save(os.path.join(settings.upload_dir, name), "JPEG", quality=85, optimize=True)
 
     photo = SharedPhoto(
-        author_name=(authorName or "").strip() or "Invitato",
+        author_name=member.full_name if member is not None else ((authorName or "").strip() or "Invitato"),
         caption=(caption or "").strip(),
         image_path=f"/uploads/{name}",
         likes_count=1,
@@ -61,7 +63,7 @@ async def upload_photo(
     return photo.to_dict(base_url_for(request))
 
 
-@router.post("/{photo_id}/like")
+@router.post("/{photo_id}/like", dependencies=[Depends(require_member)])
 def like_photo(photo_id: int, request: Request, db: Session = Depends(get_db)):
     photo = db.get(SharedPhoto, photo_id)
     if photo is None:
