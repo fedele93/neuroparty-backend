@@ -201,6 +201,7 @@ class GiftTarget(Base):
     satispay_url: Mapped[str] = mapped_column(String(300), default="")
     paypal_me_url: Mapped[str] = mapped_column(String(300), default="")
     bancomat_pay: Mapped[str] = mapped_column(String(30), default="")  # numero di telefono BANCOMAT Pay (pubblico, come l'IBAN)
+    paypal_email: Mapped[str] = mapped_column(String(200), default="")  # PayPal senza link paypal.me: l'email a cui inviare (pubblica)
     email: Mapped[str] = mapped_column(String(200), default="")  # privata: avvisi al festeggiato (auguri ricevuti)
     # link personale del festeggiato (https://<app>/#festeggiato=<token>), mandato alla sua email: vale come GRADUATE_TOKEN_<ID>
     access_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
@@ -226,6 +227,7 @@ class GiftTarget(Base):
             "satispayUrl": self.satispay_url,
             "paypalMeUrl": self.paypal_me_url,
             "bancomatPay": self.bancomat_pay,
+            "paypalEmail": self.paypal_email,
         }
 
 

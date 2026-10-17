@@ -152,6 +152,8 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
         assert "collectedAmount" not in t and "targetAmount" not in t
         assert t["iban"] and "paypalMeUrl" in t and "satispayUrl" in t and "bancomatPay" in t  # PayPal, Satispay e BANCOMAT Pay facoltativi
     assert targets[0]["bancomatPay"] == "3469556702" and targets[1]["bancomatPay"] == ""  # solo Luisi ha BANCOMAT Pay
+    cusmai = next(t for t in targets if t["id"] == "cusmai")
+    assert cusmai["paypalEmail"] == "francescocusmai96@gmail.com" and cusmai["paypalMeUrl"] == ""  # PayPal via email
     collector = client.get("/api/gifts/collector").json()
     assert collector["name"] == "Dott. Paolo Roberto" and collector["iban"]
     assert "Satispay" not in collector["paymentMethods"]
@@ -630,7 +632,7 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
     con.commit(); con.close()
 
     assert ensure_schema(make_engine(str(path))) == [
-        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "+gift_targets.bancomat_pay", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
+        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "+gift_targets.bancomat_pay", "+gift_targets.paypal_email", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
     ]  # gift_pool_contributions non esiste ancora: create_all la crea già con le colonne del cassiere
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:
