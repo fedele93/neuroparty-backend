@@ -18,11 +18,12 @@ from ..schemas import ProfileLinkRequest
 router = APIRouter(prefix="/api/graduate", tags=["festeggiato"])
 
 
-def graduate_link(request: Request, db: Session, target: GiftTarget) -> str:
+def graduate_link(request: Request, db: Session, target: GiftTarget, commit: bool = True) -> str:
     """Il link personale del festeggiato (crea il token la prima volta; poi è sempre lo stesso)."""
     if not target.access_token:
         target.access_token = secrets.token_urlsafe(24)
-        db.commit()
+        if commit:
+            db.commit()
     return f"{base_url_for(request)}/#festeggiato={target.access_token}"
 
 

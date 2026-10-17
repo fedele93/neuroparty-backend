@@ -52,6 +52,9 @@ ADDED_COLUMNS = {
     },
 }
 
+# Indici per le query che girano a ogni poll (galleria dalla più recente, a cursore).
+ADDED_INDEXES = {"ix_shared_photos_created_id": "shared_photos(created_at DESC, id DESC)"}
+
 # Residui della prima versione dei regali (importi raccolti e quote per singolo destinatario),
 # eliminati con il passaggio alla quota unica: gli utenti non devono vedere le cifre.
 DROPPED_TABLES = ("gift_contributions",)
@@ -73,6 +76,8 @@ def ensure_schema(engine) -> list[str]:
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
                     changes.append(f"+{table}.{name}")
+        for name, ddl in ADDED_INDEXES.items():
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {ddl}"))
         for table in DROPPED_TABLES:
             if insp.has_table(table):
                 conn.execute(text(f"DROP TABLE {table}"))

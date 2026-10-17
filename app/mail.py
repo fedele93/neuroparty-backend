@@ -6,7 +6,6 @@ così gli organizzatori vedono quelle non consegnate e possono rimandarle.
 from __future__ import annotations
 
 import html as html_lib
-import re
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -158,55 +157,49 @@ TREASURER_STEPS = [
 ]
 
 
+def _link_mail(*, title: str, name: str, intro: str, link: str, button: str, steps: list[str], footer: str,
+               test_phase: bool) -> tuple[str, str]:
+    """Scheletro comune delle email con link personale e istruzioni: saluto, introduzione, link,
+    passi numerati, avviso della fase di prova, chiusura. Ritorna (testo, html)."""
+    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(steps, 1))
+    text = (
+        f"Ciao {name},\n\n{intro}\n\n{link}\n\nCome funziona:\n{steps_txt}\n\n"
+        + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
+        + footer
+    )
+    body = (
+        f"<p>Ciao {html_lib.escape(name)},</p><p>{html_lib.escape(intro)}</p>"
+        + _button(link, button)
+        + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+        + _steps_html("Come funziona", steps)
+        + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
+    )
+    return text, _layout(title, body, footer.split("\n")[0])
+
+
 def graduate_link_mail(target, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
     """Link personale del festeggiato con le istruzioni per usare la sua area."""
     ev = event_summary(event_data)
-    name = first_name(target.short_name)
-    subject = f"La tua area festeggiato per {ev['title']}"
-    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(GRADUATE_STEPS, 1))
-    text = (
-        f"Ciao {name},\n\n"
-        "ecco il tuo link personale da festeggiato per l'app della festa:\n\n"
-        f"{link}\n\n"
-        f"Come funziona:\n{steps_txt}\n\n"
-        + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
-        + "Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.\n\nA presto!"
+    text, html = _link_mail(
+        title="La tua area festeggiato", name=first_name(target.short_name),
+        intro="ecco il tuo link personale da festeggiato per l'app della festa:", link=link,
+        button="Apri la mia area 🎓", steps=GRADUATE_STEPS, test_phase=test_phase,
+        footer="Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.\n\nA presto!",
     )
-    body = (
-        f"<p>Ciao {html_lib.escape(name)},</p>"
-        "<p>ecco il tuo link personale da festeggiato per l'app della festa.</p>"
-        + _button(link, "Apri la mia area 🎓")
-        + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
-        + _steps_html("Come funziona", GRADUATE_STEPS)
-        + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
-    )
-    return subject, text, _layout("La tua area festeggiato", body, "Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.")
+    return f"La tua area festeggiato per {ev['title']}", text, html
 
 
 def treasurer_invite_mail(collector: dict, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
     """Link con il token del cassiere (#cassiere=<token>) e le istruzioni per il cruscotto delle quote uniche."""
     ev = event_summary(event_data)
-    name = first_name(re.sub(r"^Dott\.(ssa)?\s*", "", collector.get("name") or "", flags=re.IGNORECASE))
     methods = ", ".join(collector.get("paymentMethods") or []) or "IBAN"
-    subject = f"Il tuo accesso da cassiere per {ev['title']}"
-    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(TREASURER_STEPS, 1))
-    text = (
-        f"Ciao {name},\n\n"
-        f"raccogli le quote uniche per i neo-specialisti (metodi che accetti: {methods}). Ecco il tuo link da cassiere:\n\n"
-        f"{link}\n\n"
-        f"Come funziona:\n{steps_txt}\n\n"
-        + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
-        + "Il link contiene il tuo token: non inoltrarlo a nessuno. Se lo perdi, chiedilo agli organizzatori.\n\nGrazie!"
+    text, html = _link_mail(
+        title="Il tuo accesso da cassiere", name=first_name(collector.get("name") or ""),
+        intro=f"raccogli le quote uniche per i neo-specialisti (metodi che accetti: {methods}). Ecco il tuo link da cassiere:",
+        link=link, button="Apri il cruscotto del cassiere 👛", steps=TREASURER_STEPS, test_phase=test_phase,
+        footer="Il link contiene il tuo token: non inoltrarlo a nessuno. Se lo perdi, chiedilo agli organizzatori.\n\nGrazie!",
     )
-    body = (
-        f"<p>Ciao {html_lib.escape(name)},</p>"
-        f"<p>raccogli le quote uniche per i neo-specialisti (metodi che accetti: <b>{html_lib.escape(methods)}</b>). Ecco il tuo link da cassiere.</p>"
-        + _button(link, "Apri il cruscotto del cassiere 👛")
-        + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
-        + _steps_html("Come funziona", TREASURER_STEPS)
-        + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
-    )
-    return subject, text, _layout("Il tuo accesso da cassiere", body, "Il link contiene il tuo token: non inoltrarlo a nessuno.")
+    return f"Il tuo accesso da cassiere per {ev['title']}", text, html
 
 
 def rsvp_confirmation_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, str, str]:

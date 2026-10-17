@@ -1,10 +1,12 @@
 import io
 import os
+import threading
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import and_, func, or_, select
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from ..auth import require_admin, require_member
@@ -33,24 +35,59 @@ def recent_photos(db: Session, limit: int = PAGE_SIZE, before_ts: int | None = N
     return list(rows[:limit]), len(rows) > limit
 
 
-def make_thumbnail(upload_dir: str, image_path: str) -> str:
-    """Crea la miniatura accanto alla foto (abc.jpg -> abc_t.jpg) e ne ritorna il percorso pubblico, "" se non riesce."""
-    src = os.path.join(upload_dir, os.path.basename(image_path or ""))
-    if not image_path or not os.path.exists(src):
+def photos_total(db: Session) -> int:
+    return int(db.scalar(select(func.count()).select_from(SharedPhoto)) or 0)
+
+
+def _upload_file(upload_dir: str, rel: str) -> str:
+    return os.path.join(upload_dir, os.path.basename(rel or ""))
+
+
+def make_thumbnail(upload_dir: str, image_path: str, img: Image.Image | None = None) -> str:
+    """Crea la miniatura accanto alla foto (abc.jpg -> abc_t.jpg) e ne ritorna il percorso pubblico, "" se non riesce.
+    Con [img] (immagine già decodificata, es. all'upload) non rilegge il file da disco."""
+    src = _upload_file(upload_dir, image_path)
+    if not image_path or (img is None and not os.path.exists(src)):
         return ""
     name = os.path.splitext(os.path.basename(src))[0] + "_t.jpg"
     try:
-        with Image.open(src) as img:
-            img = img.convert("RGB")
-            img.thumbnail((THUMB_SIDE, THUMB_SIDE))
-            img.save(os.path.join(upload_dir, name), "JPEG", quality=78, optimize=True)
+        thumb = img.copy() if img is not None else Image.open(src)
+        with thumb:
+            thumb = thumb.convert("RGB")
+            thumb.thumbnail((THUMB_SIDE, THUMB_SIDE))
+            thumb.save(os.path.join(upload_dir, name), "JPEG", quality=78, optimize=True)
     except (UnidentifiedImageError, OSError):
         return ""
     return f"/uploads/{name}"
 
 
+def remove_photo_files(upload_dir: str, photo: SharedPhoto) -> None:
+    """Cancella dal disco la foto e la sua miniatura (se ci sono)."""
+    for rel in (photo.image_path, photo.thumb_path):
+        path = _upload_file(upload_dir, rel)
+        if rel and os.path.exists(path):
+            os.remove(path)
+
+
+def _process_upload(raw: bytes, upload_dir: str) -> tuple[str, str]:
+    """Decodifica, ridimensiona e salva foto e miniatura (lavoro CPU: va eseguito fuori dall'event loop).
+    Ritorna (percorso foto, percorso miniatura); ValueError se il file non è un'immagine."""
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)  # rispetta la rotazione salvata dal telefono
+        img = img.convert("RGB")
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError("Il file non è un'immagine valida") from e
+    img.thumbnail((MAX_SIDE, MAX_SIDE))
+    os.makedirs(upload_dir, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.jpg"
+    img.save(os.path.join(upload_dir, name), "JPEG", quality=85, optimize=True)
+    image_path = f"/uploads/{name}"
+    return image_path, make_thumbnail(upload_dir, image_path, img=img)
+
+
 def ensure_thumbnails(db: Session, upload_dir: str) -> int:
-    """All'avvio: crea le miniature mancanti (foto caricate prima di questa versione). Ritorna quante."""
+    """Crea le miniature mancanti (foto caricate prima di questa versione). Ritorna quante."""
     made = 0
     for p in db.scalars(select(SharedPhoto).where(SharedPhoto.thumb_path == "", SharedPhoto.image_path != "")).all():
         thumb = make_thumbnail(upload_dir, p.image_path)
@@ -60,6 +97,21 @@ def ensure_thumbnails(db: Session, upload_dir: str) -> int:
     if made:
         db.commit()
     return made
+
+
+def ensure_thumbnails_in_background(session_factory, upload_dir: str, log) -> None:
+    """All'avvio: se ci sono foto senza miniatura le crea in un thread, senza ritardare le prime richieste
+    (nel frattempo la galleria usa la foto intera)."""
+    with session_factory() as db:
+        missing = db.scalar(select(func.count()).select_from(SharedPhoto).where(SharedPhoto.thumb_path == "", SharedPhoto.image_path != "")) or 0
+    if not missing:
+        return
+
+    def work() -> None:
+        with session_factory() as db:
+            log.info("Create %d miniature per le foto già caricate", ensure_thumbnails(db, upload_dir))
+
+    threading.Thread(target=work, name="thumbnails", daemon=True).start()
 
 
 @router.get("", dependencies=[Depends(require_member)])
@@ -82,8 +134,7 @@ def photos_page(
     già mostrata (beforeTs, beforeId). Risposta: {photos, hasMore, total}."""
     rows, more = recent_photos(db, limit, beforeTs, beforeId)
     base = base_url_for(request)
-    total = int(db.scalar(select(func.count()).select_from(SharedPhoto)) or 0)
-    return {"photos": [p.to_dict(base) for p in rows], "hasMore": more, "total": total}
+    return {"photos": [p.to_dict(base) for p in rows], "hasMore": more, "total": photos_total(db)}
 
 
 @router.post("", status_code=201)
@@ -101,21 +152,15 @@ async def upload_photo(
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"Immagine troppo grande (max {settings.max_upload_mb} MB)")
     try:
-        img = Image.open(io.BytesIO(raw))
-        img = ImageOps.exif_transpose(img)  # rispetta la rotazione salvata dal telefono
-        img = img.convert("RGB")
-    except (UnidentifiedImageError, OSError):
-        raise HTTPException(400, "Il file non è un'immagine valida")
-    img.thumbnail((MAX_SIDE, MAX_SIDE))
-    os.makedirs(settings.upload_dir, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.jpg"
-    img.save(os.path.join(settings.upload_dir, name), "JPEG", quality=85, optimize=True)
-    thumb = make_thumbnail(settings.upload_dir, f"/uploads/{name}")
+        # decodifica e ridimensionamento in un thread: il server continua a rispondere agli altri
+        image_path, thumb = await run_in_threadpool(_process_upload, raw, settings.upload_dir)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     photo = SharedPhoto(
         author_name=member.full_name if member is not None else ((authorName or "").strip() or "Invitato"),
         caption=(caption or "").strip(),
-        image_path=f"/uploads/{name}",
+        image_path=image_path,
         thumb_path=thumb,
         likes_count=1,
     )
@@ -144,11 +189,7 @@ def delete_photo(photo_id: int, request: Request, db: Session = Depends(get_db))
     photo = db.get(SharedPhoto, photo_id)
     if photo is None:
         raise HTTPException(404, "Foto non trovata")
-    for rel in (photo.image_path, photo.thumb_path):
-        if rel:
-            path = os.path.join(request.app.state.settings.upload_dir, os.path.basename(rel))
-            if os.path.exists(path):
-                os.remove(path)
+    remove_photo_files(request.app.state.settings.upload_dir, photo)
     db.delete(photo)
     bump_version(db)
     db.commit()

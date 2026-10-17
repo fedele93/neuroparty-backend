@@ -199,7 +199,7 @@ def test_role_invites_dry_run_and_send(tmp_path):
         assert c.post("/api/admin/invites", json={}).status_code == 403
         dry = c.post("/api/admin/invites", json={"dryRun": True}, headers=ADMIN).json()
         by = {(r["role"], r["id"]): r for r in dry["invites"]}
-        assert by[("graduate", "totaro")]["status"] == "READY" and by[("graduate", "totaro")]["email"] == "da…@example.org"
+        assert by[("graduate", "totaro")]["status"] == "READY" and by[("graduate", "totaro")]["email"] == "dalila@example.org"
         assert by[("graduate", "luisi")]["status"] == "NO_EMAIL"
         assert by[("treasurer", "aki")]["status"] == "READY" and by[("treasurer", "roberto")]["status"] == "NO_EMAIL"  # ha il token ma non l'email
         assert dry["ready"] == 3 and _mails(n8n) == []  # anteprima: nessuna email

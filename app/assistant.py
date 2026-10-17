@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .auth import graduate_for_token, lists_allowed, memories_access
+from .auth import graduate_for_token, lists_allowed
 from .mistral import MistralClient, MistralError
-from .models import AssistantAvatar, GiftTarget, Guest, SharedPhoto, Wish
+from .models import AssistantAvatar, GiftTarget, Guest, Wish
 from .routers import bus as bus_router
 from .routers import guests as guests_router
 from .routers import profile as profile_router
+from .routers.photos import photos_total
 from .routers import wishes as wishes_router
 from .schemas import BookingIn, CompanionIn, GuestIn, GuestUpdate, ProfileBusIn, ProfileIn, ProfileLinkRequest, WishIn
 from .seed import gift_collectors_info, public_event_info
@@ -121,6 +124,10 @@ TOOLS: list[dict] = [
             },
         },
     },
+]
+
+# Solo per chi vede foto e auguri (registrati e ruoli): agli altri il prompt spiega come registrarsi
+MEMBER_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
@@ -136,6 +143,9 @@ TOOLS: list[dict] = [
             },
         },
     },
+]
+
+TOOLS += [
     {
         "type": "function",
         "function": {
@@ -240,8 +250,22 @@ GRADUATE_TOOLS: list[dict] = [
 WRITE_TOOLS = {"set_rsvp", "book_bus", "post_wish", "update_my_profile", "book_my_bus", "cancel_my_bus", "send_profile_link"}
 
 
-def tools_for(guest: Guest | None, graduate_id: str | None = None) -> list[dict]:
-    return TOOLS + (PROFILE_TOOLS if guest is not None else []) + (GRADUATE_TOOLS if graduate_id else [])
+@dataclass(frozen=True)
+class Caller:
+    """Chi sta parlando, risolto una volta per turno dagli header: profilo invitato, festeggiato, accesso a foto e auguri."""
+    guest: Guest | None = None
+    graduate_id: str | None = None
+    can_see_memories: bool = False
+
+    @classmethod
+    def resolve(cls, request: Request, db: Session, guest: Guest | None) -> "Caller":
+        can_see = guest is not None or lists_allowed(request, db)
+        return cls(guest=guest, graduate_id=graduate_for_token(request, request.headers.get("x-graduate-token"), db), can_see_memories=can_see)
+
+
+def tools_for(guest: Guest | None, graduate_id: str | None = None, can_see_memories: bool = True) -> list[dict]:
+    return (TOOLS + (MEMBER_TOOLS if can_see_memories else []) + (PROFILE_TOOLS if guest is not None else [])
+            + (GRADUATE_TOOLS if graduate_id else []))
 
 
 def _fmt_date(iso: str) -> str:
@@ -387,8 +411,10 @@ def _profile_summary(d: dict) -> str:
     return f"{d['fullName']}: {d['rsvpLabel']}, {d['guestsCount']} persone, menu {d['menuLabel']}, accompagnatori: {comps}; {bus}."
 
 
-def execute_tool(name: str, args: dict, request: Request, db: Session, client_id: str | None, guest: Guest | None = None) -> dict:
+def execute_tool(name: str, args: dict, request: Request, db: Session, client_id: str | None, guest: Guest | None = None,
+                 caller: Caller | None = None) -> dict:
     """Esegue uno strumento e ritorna un dizionario serializzabile per il modello."""
+    caller = caller or Caller.resolve(request, db, guest)
     try:
         if name in {t["function"]["name"] for t in PROFILE_TOOLS}:
             if guest is None:
@@ -424,7 +450,7 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
             return bus_router.bus_summary(request, db)
         if name == "find_guest":
             found = _find_guests(db, args.get("name", ""))
-            if not lists_allowed(request):  # l'elenco è riservato: un invitato ritrova solo sé stesso
+            if not lists_allowed(request, db):  # l'elenco è riservato: un invitato ritrova solo sé stesso
                 found = [g for g in found if (client_id and g.owner_client_id == client_id) or (guest and g.id == guest.id)]
             return {"guests": [_guest_dict(g) for g in found], "count": len(found)}
         if name == "set_rsvp":
@@ -456,18 +482,16 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
                     + (f" da {out['pickupStop']}" if out["pickupStop"] else "") + f". Restano {summary['availableSeats']} posti.",
                     "booking": out, "bus": summary}
         if name == "post_wish":
-            allowed, member = memories_access(request, db)
-            if not allowed:
+            if not caller.can_see_memories:
                 return {"error": "Gli auguri li pubblica solo chi è registrato: l'utente deve aprire il link personale ricevuto via email (pulsante con l'omino in alto)", "navigate": "rsvp"}
             body = WishIn(authorName=args.get("authorName") or "Amico/a", targetGraduate=args.get("targetGraduate") or "Tutti i Laureandi",
                           message=(args.get("message") or "").strip())
-            out = wishes_router.create_wish(body, request, db, member)
+            out = wishes_router.create_wish(body, request, db, caller.guest)
             return {"summary": f"Augurio di {out['authorName']} per {out['targetGraduate']} pubblicato in bacheca.", "wish": out, "navigate": "wishes"}
         if name == "get_gift_options":
             return _gift_options(db, request, args.get("graduate") or "")
         if name == "read_wishes":
-            allowed, _ = memories_access(request, db)
-            if not allowed:
+            if not caller.can_see_memories:
                 return {"error": "Gli auguri e le foto li vede solo chi è registrato: serve il link personale ricevuto via email (posso mandarlo io con l'email)", "navigate": "wishes"}
             return _recent_wishes(db, args.get("forGraduate") or "", int(args.get("limit") or 3))
         if name == "send_profile_link":
@@ -475,10 +499,9 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
             out = profile_router.request_link(body, request, db)
             return {"summary": out["message"], "queued": out["queued"]} if out.get("queued") else {"error": out["message"]}
         if name == "get_my_graduate_summary":
-            graduate_id = graduate_for_token(request, request.headers.get("x-graduate-token"))
-            if not graduate_id:
+            if not caller.graduate_id:
                 return {"error": "Questa informazione è solo per i festeggiati"}
-            return _graduate_summary(request, db, graduate_id)
+            return _graduate_summary(request, db, caller.graduate_id)
         if name == "open_section":
             section = args.get("section")
             if section not in SECTIONS:
@@ -506,22 +529,19 @@ def clean_history(history: list | None) -> list[dict]:
     return out[-MAX_HISTORY:]
 
 
-def _norm(s: str) -> str:
-    import re
-
-    return re.sub(r"^dott\.(ssa)?\s*", "", (s or "").strip().lower())
+_TITLE = re.compile(r"^dott\.(ssa)?\s*")
 
 
-def _match_target(targets: list[GiftTarget], query: str) -> list[GiftTarget]:
-    q = _norm(query)
-    if not q:
-        return targets
-    return [t for t in targets if q in _norm(t.name) or any(part and part in _norm(t.name).split() for part in q.split())]
+def _name_matches(name: str, query: str) -> bool:
+    """"Cusmai", "francesco cusmai", "Dott. Francesco Cusmai" trovano lo stesso neo-specialista."""
+    q = _TITLE.sub("", (query or "").strip().lower())
+    n = _TITLE.sub("", (name or "").strip().lower())
+    return not q or q in n or any(part in n.split() for part in q.split() if part)
 
 
 def _gift_options(db: Session, request: Request, graduate: str) -> dict:
     targets = db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all()
-    found = _match_target(targets, graduate)
+    found = [t for t in targets if _name_matches(t.name, graduate)]
     if graduate and not found:
         return {"error": f"Non trovo un neo-specialista che si chiami {graduate}"}
 
@@ -539,13 +559,17 @@ def _gift_options(db: Session, request: Request, graduate: str) -> dict:
 
 
 def _recent_wishes(db: Session, for_graduate: str, limit: int) -> dict:
-    rows = db.scalars(select(Wish).order_by(Wish.created_at.desc(), Wish.id.desc())).all()
-    if for_graduate:
-        q = _norm(for_graduate)
-        rows = [w for w in rows if q in _norm(w.target_graduate) or any(p and p in _norm(w.target_graduate).split() for p in q.split())]
-    photos = int(db.scalar(select(func.count()).select_from(SharedPhoto)) or 0)
-    return {"count": len(rows), "photos": photos, "navigate": "wishes",
-            "wishes": [{"author": w.author_name, "to": w.target_graduate, "message": w.message[:280], "hearts": w.heart_count} for w in rows[:max(1, min(limit, 5))]]}
+    """Gli ultimi auguri (al massimo 5), filtrati in SQL se si chiede un neo-specialista: il destinatario
+    è salvato per nome, quindi basta cercare il cognome (o l'ultima parola della richiesta) nel campo."""
+    q = select(Wish)
+    count_q = select(func.count()).select_from(Wish)
+    key = _TITLE.sub("", (for_graduate or "").strip().lower()).split()
+    if key:
+        cond = func.lower(Wish.target_graduate).contains(key[-1])
+        q, count_q = q.where(cond), count_q.where(cond)
+    rows = db.scalars(q.order_by(Wish.created_at.desc(), Wish.id.desc()).limit(max(1, min(limit, 5)))).all()
+    return {"count": int(db.scalar(count_q) or 0), "photos": photos_total(db), "navigate": "wishes",
+            "wishes": [{"author": w.author_name, "to": w.target_graduate, "message": w.message[:280], "hearts": w.heart_count} for w in rows]}
 
 
 def _graduate_summary(request: Request, db: Session, graduate_id: str) -> dict:
@@ -568,12 +592,11 @@ def run_turn(
 ) -> dict:
     """Un turno di conversazione: ritorna testo di risposta, azioni eseguite e sezione da aprire."""
     max_seats = bus_router.max_seats(request)
-    graduate_id = graduate_for_token(request, request.headers.get("x-graduate-token"))
-    graduate = db.get(GiftTarget, graduate_id) if graduate_id else None
-    can_see, _ = memories_access(request, db)
-    tools = tools_for(guest, graduate_id)
+    caller = Caller.resolve(request, db, guest)
+    graduate = db.get(GiftTarget, caller.graduate_id) if caller.graduate_id else None
+    tools = tools_for(guest, caller.graduate_id, caller.can_see_memories)
     prompt = system_prompt(avatar, request.app.state.event_data, max_seats, guest=guest,
-                           can_see_memories=can_see, graduate_name=graduate.short_name if graduate else None)
+                           can_see_memories=caller.can_see_memories, graduate_name=graduate.short_name if graduate else None)
     messages: list[dict] = [{"role": "system", "content": prompt}]
     messages += history
     messages.append({"role": "user", "content": user_text})
@@ -598,7 +621,7 @@ def run_turn(
                 args = json.loads(raw) if isinstance(raw, str) else dict(raw)
             except json.JSONDecodeError:
                 args = {}
-            result = execute_tool(name, args, request, db, client_id, guest)
+            result = execute_tool(name, args, request, db, client_id, guest, caller)
             if result.get("navigate"):
                 navigate = result["navigate"]
             actions.append({"tool": name, "args": args, "ok": "error" not in result, "summary": result.get("summary") or result.get("error", "")})
