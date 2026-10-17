@@ -232,7 +232,7 @@ def event_facts(event_data: dict, max_seats: int) -> str:
         f"- Ritorno {busd.get('ritorno', {}).get('timeLabel', '')}: da {busd.get('ritorno', {}).get('from', '')} a "
         f"{busd.get('ritorno', {}).get('to', '')}. {busd.get('ritorno', {}).get('notes', '')}",
         f"- Fermate di salita: {', '.join(busd.get('pickupStops', []))}.",
-        "Regali: nella sezione Regali dell'app ogni neo-specialista ha IBAN, PayPal e Satispay per un regalo diretto. "
+        "Regali: nella sezione Regali dell'app ogni neo-specialista ha IBAN e, dove ci sono, PayPal, Satispay o BANCOMAT Pay (numero di telefono) per un regalo diretto. "
         f"Chi preferisce un solo versamento per tutti registra una quota unica a uno dei cassieri, {collectors_text}, "
         "che la ripartisce fra i neo-specialisti. "
         "Non esistono cifre suggerite né totali raccolti: se te lo chiedono, spiega che ognuno decide liberamente.",

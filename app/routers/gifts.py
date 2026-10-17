@@ -1,7 +1,7 @@
 """Regali: coordinate per donare direttamente ai neo-specialisti e quota unica tramite il cassiere.
 
 - I destinatari (GET /targets) espongono solo nome, regalo e coordinate di pagamento: chi dona
-  direttamente copia l'IBAN o apre PayPal/Satispay, senza registrare nulla sul server.
+  direttamente copia l'IBAN (o il numero BANCOMAT Pay) o apre PayPal/Satispay, senza registrare nulla sul server.
 - La quota unica (POST /pool) viene invece registrata con la ripartizione fra i neo-specialisti:
   serve al cassiere scelto (vedi "giftCollectors" in event-data.json) per sapere quanto girare a ognuno.
   L'elenco completo è riservato al cassiere/organizzatori (X-Treasurer-Token o X-Admin-Token);

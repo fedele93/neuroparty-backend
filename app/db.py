@@ -36,7 +36,10 @@ ADDED_COLUMNS = {
         "collector_id": "VARCHAR(64) NOT NULL DEFAULT ''", "collector_name": "VARCHAR(200) NOT NULL DEFAULT ''",
         "email": "VARCHAR(200) NOT NULL DEFAULT ''", "treasurer_note": "TEXT NOT NULL DEFAULT ''",
     },
-    "gift_targets": {"email": "VARCHAR(200) NOT NULL DEFAULT ''", "access_token": "VARCHAR(64)"},
+    "gift_targets": {
+        "email": "VARCHAR(200) NOT NULL DEFAULT ''", "access_token": "VARCHAR(64)",
+        "bancomat_pay": "VARCHAR(30) NOT NULL DEFAULT ''",
+    },
     "bus_bookings": {
         "guest_id": "INTEGER", "status": "VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED'", "code": "VARCHAR(16) NOT NULL DEFAULT ''",
         "checked_in_at": "INTEGER",
