@@ -1,4 +1,6 @@
 """Cruscotto degli organizzatori (ADMIN_TOKEN): i numeri che servono a colpo d'occhio e le cose da fare."""
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
@@ -9,8 +11,8 @@ from ..deadlines import deadlines_info
 from ..deps import base_url_for, get_db
 from ..mail import graduate_link_mail, treasurer_invite_mail
 from ..models import (
-    AssistantAvatar, BusBooking, EventNotification, GiftPoolAllocation, GiftPoolContribution, GiftTarget, Guest,
-    MailOutbox, Meta, SharedPhoto, Wish, now_ms,
+    AssistantAvatar, BusBooking, EventNotification, GiftCollectorToken, GiftPoolAllocation, GiftPoolContribution,
+    GiftTarget, Guest, MailOutbox, Meta, SharedPhoto, Wish, now_ms,
 )
 from ..push import subscription_count
 from ..routers.bus import bus_summary
@@ -97,6 +99,21 @@ class InvitesIn(BaseModel):
     ids: list[str] = []
     dryRun: bool = True
     testPhase: bool = False
+    # rigenera i link personali prima di inviarli: quelli già in giro smettono di valere (revoca)
+    rotate: bool = False
+
+
+def collector_link(request: Request, db: Session, collector_id: str, rotate: bool = False) -> str:
+    """Il link personale del cassiere (#cassiere=<token>): generato nel database la prima volta, poi sempre lo
+    stesso; con rotate ne crea uno nuovo. Vale come TREASURER_TOKEN_<ID>. Senza commit: lo fa chi chiama."""
+    row = db.get(GiftCollectorToken, collector_id)
+    if row is None:
+        row = GiftCollectorToken(collector_id=collector_id, access_token=secrets.token_urlsafe(24))
+        db.add(row)
+    elif rotate:
+        row.access_token = secrets.token_urlsafe(24)
+        row.created_at = now_ms()
+    return f"{base_url_for(request)}/#cassiere={row.access_token}"
 
 
 @router.post("/invites")
@@ -107,28 +124,25 @@ def send_invites(body: InvitesIn, request: Request, db: Session = Depends(get_db
     event_data = request.app.state.event_data
     wanted = {i.strip().lower() for i in body.ids if i.strip()}
 
-    # Candidati omogenei: (ruolo, id, nome, email, motivo per cui non si può invitare, costruttore della mail).
-    # I link dei festeggiati vengono creati senza commit: uno solo alla fine, prima di mettere in coda le email.
+    # Candidati omogenei: (ruolo, id, nome, email, costruttore della mail). I link (festeggiati e cassieri) nascono
+    # nel database senza commit: uno solo alla fine, prima di mettere in coda le email.
     candidates = []
     if "graduates" in body.roles:
         for t in db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all():
-            candidates.append(("graduate", t.id, t.name, t.email, None,
+            if body.rotate and not body.dryRun:
+                t.access_token = None  # graduate_link ne crea uno nuovo
+            candidates.append(("graduate", t.id, t.name, t.email,
                                lambda t=t: ("graduate_link", graduate_link_mail(t, graduate_link(request, db, t, commit=False), event_data, test_phase=body.testPhase))))
     if "treasurers" in body.roles:
         for c in gift_collectors_info(event_data):
-            token = settings.treasurer_tokens.get(c["id"], "")
-            link = f"{base_url_for(request)}/#cassiere={token}"
             candidates.append(("treasurer", c["id"], c.get("name", ""), settings.treasurer_emails.get(c["id"], ""),
-                               None if token else "NO_TOKEN",
-                               lambda c=c, link=link: ("treasurer_invite", treasurer_invite_mail(c, link, event_data, test_phase=body.testPhase))))
+                               lambda c=c: ("treasurer_invite", treasurer_invite_mail(c, collector_link(request, db, c["id"], rotate=body.rotate), event_data, test_phase=body.testPhase))))
 
     rows = []
-    for role, rid, name, email, blocked, build in candidates:
+    for role, rid, name, email, build in candidates:
         if wanted and rid not in wanted:
             continue
-        if blocked:
-            status = blocked
-        elif not email:
+        if not email:
             status = "NO_EMAIL"
         elif body.dryRun:
             status = "READY"
@@ -138,7 +152,7 @@ def send_invites(body: InvitesIn, request: Request, db: Session = Depends(get_db
             kind, (subject, text, html) = build()
             db.commit()  # il token appena creato deve essere salvato prima che l'email parta
             status = (mailer.send(kind, email, subject, text, html) or {}).get("status", "QUEUED")
-        rows.append({"role": role, "id": rid, "name": name, "email": email, "status": status, "hasLink": blocked is None})
+        rows.append({"role": role, "id": rid, "name": name, "email": email, "status": status, "hasLink": True})
     return {"dryRun": body.dryRun, "mailEnabled": mailer.enabled, "invites": rows,
             "ready": sum(1 for r in rows if r["status"] in ("READY", "QUEUED", "DELIVERED"))}
 

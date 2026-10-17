@@ -201,7 +201,7 @@ def test_role_invites_dry_run_and_send(tmp_path):
         by = {(r["role"], r["id"]): r for r in dry["invites"]}
         assert by[("graduate", "totaro")]["status"] == "READY" and by[("graduate", "totaro")]["email"] == "dalila@example.org"
         assert by[("graduate", "luisi")]["status"] == "NO_EMAIL"
-        assert by[("treasurer", "aki")]["status"] == "READY" and by[("treasurer", "roberto")]["status"] == "NO_EMAIL"  # ha il token ma non l'email
+        assert by[("treasurer", "aki")]["status"] == "READY" and by[("treasurer", "roberto")]["status"] == "NO_EMAIL"
         assert dry["ready"] == 3 and _mails(n8n) == []  # anteprima: nessuna email
         sent = c.post("/api/admin/invites", json={"dryRun": False, "testPhase": True, "ids": ["totaro", "aki"]}, headers=ADMIN).json()
         assert {(r["role"], r["id"]) for r in sent["invites"]} == {("graduate", "totaro"), ("treasurer", "aki")}
@@ -210,7 +210,21 @@ def test_role_invites_dry_run_and_send(tmp_path):
         assert "fase di prova" in mails[0]["text"].lower() and "Installa" in mails[0]["text"] and "#festeggiato=" in mails[0]["text"]
         token = re.search(r"#festeggiato=([A-Za-z0-9_-]+)", mails[0]["text"]).group(1)
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token}).json()["graduate"]["id"] == "totaro"
-        assert "#cassiere=tok-aki" in mails[1]["text"] and "Promemoria" in mails[1]["text"] and mails[1]["to"] == "aki@example.org"
+        # il link del cassiere nasce nel database (non è il token del .env) e vale solo per le sue quote
+        aki_link = re.search(r"#cassiere=([A-Za-z0-9_-]{20,})", mails[1]["text"]).group(1)
+        assert aki_link != "tok-aki" and "Promemoria" in mails[1]["text"] and mails[1]["to"] == "aki@example.org"
+        board = c.get("/api/gifts/pool", headers={"X-Treasurer-Token": aki_link}).json()
+        assert [x["id"] for x in board["collectors"]] == ["aki"]
+        assert c.get("/api/state", headers={"X-Treasurer-Token": aki_link}).json()["roles"]["treasurerIds"] == ["aki"]
+        # stesso link a un nuovo invio; con rotate ne nasce uno nuovo e il vecchio smette di valere
+        c.post("/api/admin/invites", json={"dryRun": False, "ids": ["aki"], "roles": ["treasurers"]}, headers=ADMIN)
+        assert aki_link in _mails(n8n)[-1]["text"]
+        c.post("/api/admin/invites", json={"dryRun": False, "ids": ["aki"], "roles": ["treasurers"], "rotate": True}, headers=ADMIN)
+        new_link = re.search(r"#cassiere=([A-Za-z0-9_-]{20,})", _mails(n8n)[-1]["text"]).group(1)
+        assert new_link != aki_link
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": aki_link}).status_code == 403
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": new_link}).status_code == 200
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "tok-aki"}).status_code == 200  # il .env continua a valere
 
 
 def test_reset_test_data_keeps_configuration(tmp_path):
@@ -236,3 +250,19 @@ def test_reset_test_data_keeps_configuration(tmp_path):
         assert c.get(photo["imageUri"].replace("https://festa.example.org", "")).status_code == 404  # file cancellati
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token}).status_code == 200  # i link dei festeggiati restano
         assert c.get("/api/gifts/pool", headers=TREASURER).json()["summary"]["contributions"] == 0
+
+
+def test_treasurer_link_works_without_env_tokens(tmp_path):
+    """Senza TREASURER_TOKEN nel .env i cassieri entrano comunque con il link generato dal cruscotto."""
+    n8n = FakeN8n()
+    with make_client(tmp_path, webhook_url=N8N_URL, webhook_secret="shh", webhook_handler=n8n, treasurer_token="",
+                     treasurer_emails={"roberto": "paolo@example.org"}) as c:
+        c.app.state.mailer.sync = True
+        assert c.get("/api/state").json()["treasurerEnabled"] is False
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "x" * 30}).status_code == 503
+        c.post("/api/admin/invites", json={"dryRun": False, "roles": ["treasurers"]}, headers=ADMIN)
+        import re
+        link = re.search(r"#cassiere=([A-Za-z0-9_-]{20,})", _mails(n8n)[-1]["text"]).group(1)
+        assert c.get("/api/state").json()["treasurerEnabled"] is True
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": link}).status_code == 200
+        assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "x" * 30}).status_code == 403
