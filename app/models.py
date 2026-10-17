@@ -170,17 +170,21 @@ class SharedPhoto(Base):
     image_res_id: Mapped[int] = mapped_column(Integer, default=0)
     # Percorso relativo del file caricato (es. /uploads/abc.jpg); vuoto per i segnaposto.
     image_path: Mapped[str] = mapped_column(String(300), default="")
+    # Miniatura (lato lungo 480 px, pochi KB) per la galleria; la foto intera si carica solo ingrandendola.
+    thumb_path: Mapped[str] = mapped_column(String(300), default="")
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
     def to_dict(self, base_url: str = "") -> dict:
         image_uri = f"{base_url}{self.image_path}" if self.image_path else ""
+        thumb_uri = f"{base_url}{self.thumb_path}" if self.thumb_path else image_uri
         return {
             "id": self.id,
             "authorName": self.author_name,
             "caption": self.caption,
             "imageResId": self.image_res_id,
             "imageUri": image_uri,
+            "thumbUri": thumb_uri,
             "likesCount": self.likes_count,
             "createdAt": self.created_at,
         }

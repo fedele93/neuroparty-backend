@@ -1,11 +1,19 @@
 """Cruscotto degli organizzatori (ADMIN_TOKEN): i numeri che servono a colpo d'occhio e le cose da fare."""
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_admin
 from ..deadlines import deadlines_info
 from ..deps import get_db
+from ..deps import base_url_for
+from ..mail import graduate_link_mail, treasurer_invite_mail
+from ..models import (
+    EventNotification, GiftPoolAllocation, Meta,
+)
 from ..models import AssistantAvatar, BusBooking, GiftPoolContribution, GiftTarget, Guest, MailOutbox, SharedPhoto, Wish, now_ms
 from ..push import subscription_count
 from ..routers.bus import bus_summary
@@ -76,3 +84,116 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "deadlines": deadlines,
         "todo": todo,
     }
+
+
+# ------------------------------------------------------------------ inviti a festeggiati e cassieri
+
+
+class InvitesIn(BaseModel):
+    """Chi invitare: "graduates" (link #festeggiato= alla GRADUATE_EMAIL_<ID>) e/o "treasurers"
+    (link #cassiere=<TREASURER_TOKEN_<ID>> alla TREASURER_EMAIL_<ID>). ids vuoto = tutti.
+    dryRun = solo l'elenco di chi riceverebbe cosa; testPhase = aggiunge le istruzioni per la fase di prova."""
+    roles: list[str] = ["graduates", "treasurers"]
+    ids: list[str] = []
+    dryRun: bool = True
+    testPhase: bool = False
+
+
+def _mask(email: str) -> str:
+    user, _, domain = (email or "").partition("@")
+    return (user[:2] + "…@" + domain) if domain else ""
+
+
+@router.post("/invites")
+def send_invites(body: InvitesIn, request: Request, db: Session = Depends(get_db)):
+    """Manda (o con dryRun elenca) gli inviti con link personale e istruzioni dettagliate a festeggiati e cassieri.
+    Le email non escono intere nella risposta: solo l'inizio, per riconoscerle."""
+    from .graduate import graduate_link
+
+    settings = request.app.state.settings
+    mailer = request.app.state.mailer
+    wanted = {i.strip().lower() for i in body.ids if i.strip()}
+    rows = []
+
+    def add(role, rid, name, email, status, link_ok=True):
+        rows.append({"role": role, "id": rid, "name": name, "email": _mask(email), "status": status, "hasLink": link_ok})
+
+    if "graduates" in body.roles:
+        for t in db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all():
+            if wanted and t.id not in wanted:
+                continue
+            if not t.email:
+                add("graduate", t.id, t.name, "", "NO_EMAIL", False)
+                continue
+            if body.dryRun:
+                add("graduate", t.id, t.name, t.email, "READY")
+                continue
+            if not mailer.enabled:
+                add("graduate", t.id, t.name, t.email, "MAIL_DISABLED")
+                continue
+            subject, text, html = graduate_link_mail(t, graduate_link(request, db, t), request.app.state.event_data, test_phase=body.testPhase)
+            out = mailer.send("graduate_link", t.email, subject, text, html)
+            add("graduate", t.id, t.name, t.email, (out or {}).get("status", "QUEUED"))
+    if "treasurers" in body.roles:
+        for c in gift_collectors_info(request.app.state.event_data):
+            cid = c["id"]
+            if wanted and cid not in wanted:
+                continue
+            token = settings.treasurer_tokens.get(cid, "")
+            email = settings.treasurer_emails.get(cid, "")
+            if not token:
+                add("treasurer", cid, c.get("name", ""), email, "NO_TOKEN", False)
+                continue
+            if not email:
+                add("treasurer", cid, c.get("name", ""), "", "NO_EMAIL")
+                continue
+            if body.dryRun:
+                add("treasurer", cid, c.get("name", ""), email, "READY")
+                continue
+            if not mailer.enabled:
+                add("treasurer", cid, c.get("name", ""), email, "MAIL_DISABLED")
+                continue
+            link = f"{base_url_for(request)}/#cassiere={token}"
+            subject, text, html = treasurer_invite_mail(c, link, request.app.state.event_data, test_phase=body.testPhase)
+            out = mailer.send("treasurer_invite", email, subject, text, html)
+            add("treasurer", cid, c.get("name", ""), email, (out or {}).get("status", "QUEUED"))
+    return {"dryRun": body.dryRun, "mailEnabled": mailer.enabled, "invites": rows,
+            "ready": sum(1 for r in rows if r["status"] in ("READY", "QUEUED", "DELIVERED"))}
+
+
+# ------------------------------------------------------------------ azzeramento dei dati di prova
+
+
+class ResetIn(BaseModel):
+    confirm: str = ""
+
+
+@router.post("/reset-test-data")
+def reset_test_data(body: ResetIn, request: Request, db: Session = Depends(get_db)):
+    """Cancella i dati raccolti durante le prove (invitati e profili, navetta, auguri, foto con i file, quote uniche,
+    notifiche, email in coda) prima di aprire l'app agli invitati. Restano la configurazione dell'evento, i regali
+    con le coordinate e i link dei festeggiati, gli avatar dell'assistente e le iscrizioni alle notifiche push.
+    Serve confirm = "AZZERA"."""
+    if body.confirm.strip().upper() != "AZZERA":
+        raise HTTPException(422, 'Per confermare scrivi AZZERA')
+    upload_dir = request.app.state.settings.upload_dir
+    for p in db.scalars(select(SharedPhoto)).all():
+        for rel in (p.image_path, p.thumb_path):
+            path = os.path.join(upload_dir, os.path.basename(rel or ""))
+            if rel and os.path.exists(path):
+                os.remove(path)
+    counts = {}
+    # prima ciò che rimanda ad altro (email e prenotazioni agli invitati, ripartizioni alle quote)
+    for name, model in (("mails", MailOutbox), ("busBookings", BusBooking), ("poolAllocations", GiftPoolAllocation),
+                        ("poolContributions", GiftPoolContribution), ("wishes", Wish), ("photos", SharedPhoto),
+                        ("notifications", EventNotification), ("guests", Guest)):
+        counts[name] = db.execute(delete(model)).rowcount or 0
+    # i dati di esempio non devono tornare al prossimo riavvio
+    if db.get(Meta, "seeded") is None:
+        db.add(Meta(key="seeded", value="1"))
+    from ..state import bump_version
+
+    bump_version(db)
+    db.commit()
+    request.app.state.webhooks.emit("admin.reset", {"deleted": counts})
+    return {"deleted": counts}

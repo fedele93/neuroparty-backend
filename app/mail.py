@@ -6,6 +6,7 @@ così gli organizzatori vedono quelle non consegnate e possono rimandarle.
 from __future__ import annotations
 
 import html as html_lib
+import re
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,7 @@ RSVP_LABELS = {"CONFIRMED": "Confermata", "PENDING": "In attesa di conferma", "D
 KINDS = {
     "access_link": "Link personale",
     "graduate_link": "Link del festeggiato",
+    "treasurer_invite": "Accesso del cassiere",
     "rsvp_confirmation": "Conferma partecipazione",
     "menu_reminder": "Promemoria menu",
     "bus_confirmation": "Conferma navetta",
@@ -117,26 +119,94 @@ def access_link_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, st
     return subject, text, _layout("Il tuo link personale", body, "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.")
 
 
-def graduate_link_mail(target, link: str, event_data: dict) -> tuple[str, str, str]:
-    """Link personale del festeggiato: apre l'area 🎓 (chi viene, auguri, coordinate, avatar)."""
+TEST_PHASE_TEXT = (
+    "Siamo nella fase di prova: usa l'app come faresti davvero (conferme, navetta, auguri, foto, quote) e segnala "
+    "a Fedele tutto quello che non funziona o non si capisce, con uno screenshot, cosa stavi facendo e che telefono/browser usi. "
+    "I dati inseriti in questa fase verranno cancellati prima di aprire l'app agli invitati."
+)
+
+
+def _steps_html(title: str, steps: list[str]) -> str:
+    return f"<p><b>{html_lib.escape(title)}</b></p><ol>" + "".join(f"<li>{html_lib.escape(x)}</li>" for x in steps) + "</ol>"
+
+
+GRADUATE_STEPS = [
+    "Apri il link qui sotto dal telefono: l'app salva il tuo accesso e apre la tua area 🎓 (la ritrovi sempre in alto nella scheda Programma).",
+    "Installa l'app sulla schermata Home: su iPhone in Safari tocca Condividi → Aggiungi a Home; su Android in Chrome tocca ⋮ → Installa app. "
+    "Se usi l'app Android, incolla questo link nel campo \"Token o link festeggiato\" in ⚙️.",
+    "Nella tua area: chi ha confermato, chi è in attesa, accompagnatori e menu, i posti sulla navetta.",
+    "Gli auguri per te con i cuori ricevuti; ti arriva anche un'email a ogni augurio dedicato a te.",
+    "Le tue coordinate per il regalo diretto (IBAN, PayPal, Satispay, BANCOMAT Pay) come le vedono gli invitati: controlla che siano giuste "
+    "e scrivi agli organizzatori se c'è da correggere.",
+    "Il tuo avatar dell'assistente vocale (pulsante Chiedi): scegli come presentarti e carica 20-30 secondi della tua voce se vuoi che "
+    "risponda con la tua voce.",
+    "Con l'accesso da festeggiato vedi anche l'elenco completo degli invitati e della navetta, e puoi vedere e pubblicare foto e auguri. "
+    "Le cifre delle quote uniche restano ai cassieri.",
+]
+
+TREASURER_STEPS = [
+    "Apri il link qui sotto dal telefono o dal computer: l'app salva il tuo token da cassiere e apre la scheda Regali.",
+    "Installa l'app sulla schermata Home (iPhone: Safari → Condividi → Aggiungi a Home; Android: Chrome → ⋮ → Installa app). "
+    "Il cruscotto dei cassieri è nella versione web dell'app, non nell'app Android.",
+    "In Regali, sotto il blocco della quota unica, trovi il tuo cruscotto: solo le quote versate a te, con chi, quanto, come e per chi.",
+    "Quando un versamento arriva (bonifico, PayPal o contanti, secondo i metodi che accetti) segnalo come ricevuto, anche più quote insieme: "
+    "chi ha lasciato l'email riceve la conferma in automatico.",
+    "Per ogni quota puoi scrivere un appunto (es. \"bonifico visto il 3/11\") e contattare chi l'ha registrata.",
+    "Il pulsante Promemoria scrive a chi ha registrato una quota ma non l'ha ancora versata.",
+    "Il cruscotto calcola quanto girare a ciascun neo-specialista; il CSV per Excel (⚙️ → Esporta quote uniche) ha una colonna per ciascuno e i totali.",
+    "Controlla nel blocco della quota unica che i tuoi IBAN e PayPal siano giusti: sono quelli che vedono gli invitati.",
+]
+
+
+def graduate_link_mail(target, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
+    """Link personale del festeggiato con le istruzioni per usare la sua area."""
     ev = event_summary(event_data)
     name = first_name(target.short_name)
     subject = f"La tua area festeggiato per {ev['title']}"
+    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(GRADUATE_STEPS, 1))
     text = (
         f"Ciao {name},\n\n"
-        "ecco il tuo link personale da festeggiato: apre la tua area nell'app, con chi viene alla festa, "
-        "gli auguri che ti scrivono, le coordinate per i regali e il tuo avatar dell'assistente.\n\n"
+        "ecco il tuo link personale da festeggiato per l'app della festa:\n\n"
         f"{link}\n\n"
-        "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.\n\nA presto!"
+        f"Come funziona:\n{steps_txt}\n\n"
+        + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
+        + "Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.\n\nA presto!"
     )
     body = (
         f"<p>Ciao {html_lib.escape(name)},</p>"
-        "<p>ecco il tuo link personale da festeggiato: apre la tua area nell'app, con chi viene alla festa, "
-        "gli auguri che ti scrivono, le coordinate per i regali e il tuo avatar dell'assistente.</p>"
+        "<p>ecco il tuo link personale da festeggiato per l'app della festa.</p>"
         + _button(link, "Apri la mia area 🎓")
         + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+        + _steps_html("Come funziona", GRADUATE_STEPS)
+        + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
     )
-    return subject, text, _layout("La tua area festeggiato", body, "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.")
+    return subject, text, _layout("La tua area festeggiato", body, "Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.")
+
+
+def treasurer_invite_mail(collector: dict, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
+    """Link con il token del cassiere (#cassiere=<token>) e le istruzioni per il cruscotto delle quote uniche."""
+    ev = event_summary(event_data)
+    name = first_name(re.sub(r"^Dott\.(ssa)?\s*", "", collector.get("name") or "", flags=re.IGNORECASE))
+    methods = ", ".join(collector.get("paymentMethods") or []) or "IBAN"
+    subject = f"Il tuo accesso da cassiere per {ev['title']}"
+    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(TREASURER_STEPS, 1))
+    text = (
+        f"Ciao {name},\n\n"
+        f"raccogli le quote uniche per i neo-specialisti (metodi che accetti: {methods}). Ecco il tuo link da cassiere:\n\n"
+        f"{link}\n\n"
+        f"Come funziona:\n{steps_txt}\n\n"
+        + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
+        + "Il link contiene il tuo token: non inoltrarlo a nessuno. Se lo perdi, chiedilo agli organizzatori.\n\nGrazie!"
+    )
+    body = (
+        f"<p>Ciao {html_lib.escape(name)},</p>"
+        f"<p>raccogli le quote uniche per i neo-specialisti (metodi che accetti: <b>{html_lib.escape(methods)}</b>). Ecco il tuo link da cassiere.</p>"
+        + _button(link, "Apri il cruscotto del cassiere 👛")
+        + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+        + _steps_html("Come funziona", TREASURER_STEPS)
+        + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
+    )
+    return subject, text, _layout("Il tuo accesso da cassiere", body, "Il link contiene il tuo token: non inoltrarlo a nessuno.")
 
 
 def rsvp_confirmation_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, str, str]:

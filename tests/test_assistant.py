@@ -249,3 +249,43 @@ def test_real_client_http_calls(tmp_path):
         c.app.state.assistant.client.client = httpx.Client(transport=httpx.MockTransport(lambda q: httpx.Response(429, json={"message": "rate limit"})))
         r = c.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "ciao"})
         assert r.status_code == 502 and "429" in r.json()["detail"]
+
+
+def test_new_tools_gifts_wishes_link_and_graduate(tmp_path):
+    """Strumenti nuovi: metodi di regalo per festeggiato, auguri solo per registrati, link personale via email,
+    riepilogo per il festeggiato che parla; il prompt dice all'avatar cosa può fare chi parla."""
+    from fastapi import Request
+
+    from app.assistant import execute_tool, system_prompt, tools_for
+    from app.models import AssistantAvatar
+
+    with make_client(tmp_path, assistant_fake=True, graduate_tokens={"luisi": "grad-luisi"}) as c:
+        app = c.app
+        base = {"type": "http", "app": app, "method": "POST", "path": "/", "query_string": b"", "client": ("t", 0), "server": ("t", 80), "scheme": "http"}
+        anon = Request({**base, "headers": []})
+        grad = Request({**base, "headers": [(b"x-graduate-token", b"grad-luisi")]})
+        with app.state.session_factory() as db:
+            out = execute_tool("get_gift_options", {"graduate": "Cusmai"}, anon, db, None)
+            g = out["graduates"]
+            assert len(g) == 1 and g[0]["iban"].startswith("IT49") and "francescocusmai96@gmail.com" in g[0]["paypal"] and out["navigate"] == "gifts"
+            luisi = execute_tool("get_gift_options", {"graduate": "Fedele Luisi"}, anon, db, None)["graduates"][0]
+            assert luisi["bancomatPay"] == "3469556702" and luisi["satispay"] is True
+            assert len(execute_tool("get_gift_options", {}, anon, db, None)["graduates"]) == 9
+            assert "error" in execute_tool("get_gift_options", {"graduate": "Nessuno Esiste"}, anon, db, None)
+            # auguri: solo per chi è registrato o ha un ruolo
+            assert "error" in execute_tool("read_wishes", {}, anon, db, None)
+            w = execute_tool("read_wishes", {"forGraduate": "Luisi", "limit": 2}, grad, db, None)
+            assert 1 <= len(w["wishes"]) <= 2 and w["photos"] >= 3 and all("Luisi" in x["to"] for x in w["wishes"])
+            # link personale: senza n8n il server lo dice (errore leggibile), con email non valida errore
+            assert "error" in execute_tool("send_profile_link", {"email": "zia@example.org", "fullName": "Zia Rosa"}, anon, db, None)
+            assert "error" in execute_tool("send_profile_link", {"email": "non-una-mail"}, anon, db, None)
+            # festeggiato: riepilogo solo per lui
+            s = execute_tool("get_my_graduate_summary", {}, grad, db, None)
+            assert s["name"] == "Fedele Luisi" and s["confirmedGuests"] >= 1 and s["wishesForMe"] >= 1
+            assert "error" in execute_tool("get_my_graduate_summary", {}, anon, db, None)
+            av = db.get(AssistantAvatar, "luisi")
+            assert "get_my_graduate_summary" in {t["function"]["name"] for t in tools_for(None, "luisi")}
+            assert "get_my_graduate_summary" not in {t["function"]["name"] for t in tools_for(None)}
+            locked = system_prompt(av, app.state.event_data, 54, can_see_memories=False)
+            assert "NON è registrato" in locked and "send_profile_link" in locked
+            assert "uno dei festeggiati" in system_prompt(av, app.state.event_data, 54, graduate_name="Fedele Luisi")

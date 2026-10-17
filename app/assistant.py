@@ -14,14 +14,14 @@ from fastapi import HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .auth import lists_allowed, memories_access
+from .auth import graduate_for_token, lists_allowed, memories_access
 from .mistral import MistralClient, MistralError
-from .models import AssistantAvatar, Guest
+from .models import AssistantAvatar, GiftTarget, Guest, SharedPhoto, Wish
 from .routers import bus as bus_router
 from .routers import guests as guests_router
 from .routers import profile as profile_router
 from .routers import wishes as wishes_router
-from .schemas import BookingIn, CompanionIn, GuestIn, GuestUpdate, ProfileBusIn, ProfileIn, WishIn
+from .schemas import BookingIn, CompanionIn, GuestIn, GuestUpdate, ProfileBusIn, ProfileIn, ProfileLinkRequest, WishIn
 from .seed import gift_collectors_info, public_event_info
 
 log = logging.getLogger("neuroparty.assistant")
@@ -111,6 +111,48 @@ TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_gift_options",
+            "description": "Come fare un regalo diretto a un neo-specialista (IBAN, PayPal con link o email, Satispay, BANCOMAT Pay) "
+                           "e i cassieri della quota unica. Senza 'graduate' restituisce tutti. Non leggere l'IBAN intero ad alta voce "
+                           "se non te lo chiedono: dì quali metodi ci sono e apri la sezione Regali, dove si copia con un tocco.",
+            "parameters": {
+                "type": "object",
+                "properties": {"graduate": {"type": "string", "description": "Nome o cognome del neo-specialista (facoltativo)"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_wishes",
+            "description": "Gli auguri più recenti in bacheca (anche solo quelli per un neo-specialista) e quante foto ci sono in galleria. "
+                           "Funziona solo per chi è registrato o ha un ruolo: altrimenti spiega come registrarsi.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "forGraduate": {"type": "string", "description": "Nome del neo-specialista (facoltativo)"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 5},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_profile_link",
+            "description": "Manda all'email indicata il link personale del profilo (serve per vedere e pubblicare foto e auguri, "
+                           "confermare la presenza con menu e accompagnatori, prenotare la navetta). Se la persona non è in lista serve anche "
+                           "il nome. Chiamala SOLO dopo aver ripetuto l'email all'utente e avuto il suo sì.",
+            "parameters": {
+                "type": "object",
+                "properties": {"email": {"type": "string"}, "fullName": {"type": "string", "description": "Nome e cognome, se non è in lista"}},
+                "required": ["email"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "open_section",
             "description": "Apre una sezione dell'app sul telefono dell'utente.",
             "parameters": {
@@ -182,11 +224,24 @@ PROFILE_TOOLS: list[dict] = [
     },
 ]
 
-WRITE_TOOLS = {"set_rsvp", "book_bus", "post_wish", "update_my_profile", "book_my_bus", "cancel_my_bus"}
+# Solo quando parla un festeggiato (X-Graduate-Token valido, anche dal link via email)
+GRADUATE_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_graduate_summary",
+            "description": "Per il festeggiato che sta parlando: quanti hanno confermato e quante persone in tutto, chi è ancora in attesa, "
+                           "quanti auguri ha ricevuto (gli ultimi messaggi), i posti prenotati sulla navetta.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+WRITE_TOOLS = {"set_rsvp", "book_bus", "post_wish", "update_my_profile", "book_my_bus", "cancel_my_bus", "send_profile_link"}
 
 
-def tools_for(guest: Guest | None) -> list[dict]:
-    return TOOLS + (PROFILE_TOOLS if guest is not None else [])
+def tools_for(guest: Guest | None, graduate_id: str | None = None) -> list[dict]:
+    return TOOLS + (PROFILE_TOOLS if guest is not None else []) + (GRADUATE_TOOLS if graduate_id else [])
 
 
 def _fmt_date(iso: str) -> str:
@@ -252,7 +307,24 @@ def profile_facts(guest: Guest | None) -> str:
             "(non set_rsvp o book_bus, che servono per altre persone).")
 
 
-def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now: datetime | None = None, guest: Guest | None = None) -> str:
+def access_facts(can_see_memories: bool, graduate_name: str | None) -> str:
+    """Cosa può fare chi parla: foto e auguri (solo registrati e ruoli) e se è uno dei festeggiati."""
+    lines = []
+    if graduate_name:
+        lines.append(f"Chi parla è {graduate_name}, uno dei festeggiati: per i suoi numeri (chi viene, auguri ricevuti) usa get_my_graduate_summary. "
+                     "Ricordagli che la sua area 🎓 è in alto nella scheda Programma.")
+    if can_see_memories:
+        lines.append("L'utente può vedere e pubblicare foto e auguri.")
+    else:
+        lines.append("L'utente NON è registrato: foto e auguri sono riservati a chi ha aperto il link personale ricevuto via email "
+                     "(vale anche se non viene alla festa). Se vuole vederli o pubblicarne, offri di mandargli il link con send_profile_link "
+                     "(chiedi l'email, e il nome se non è in lista) oppure di aprire la Bacheca, dove può richiederlo. "
+                     "I festeggiati entrano dalla Bacheca o da ⚙️ con 'Sono un festeggiato'.")
+    return " ".join(lines)
+
+
+def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now: datetime | None = None, guest: Guest | None = None,
+                  can_see_memories: bool = True, graduate_name: str | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     persona = avatar.persona.strip() or f"Sei {avatar.short_name}, uno dei neo-specialisti festeggiati."
     return (
@@ -264,11 +336,13 @@ def system_prompt(avatar: AssistantAvatar, event_data: dict, max_seats: int, now
         "Usa solo le informazioni qui sotto e gli strumenti: se non sai una cosa, dillo con garbo e suggerisci di chiedere agli organizzatori. "
         "Non inventare orari, indirizzi o nomi. Se un orario è 'da definire', dillo.\n"
         "Puoi agire sull'app con gli strumenti: leggere i posti liberi sulla navetta, cercare un invitato, confermare o modificare "
-        "un RSVP, prenotare la navetta, pubblicare un augurio, aprire una sezione. Prima di ogni azione che scrive dati "
-        "(set_rsvp, book_bus, post_wish) riassumi i dati e chiedi conferma; chiama lo strumento solo dopo un sì esplicito. "
+        "un RSVP, prenotare la navetta, dire come fare un regalo a un neo-specialista, leggere gli ultimi auguri, pubblicare un augurio, "
+        "mandare il link personale via email, aprire una sezione. Prima di ogni azione che scrive dati o manda email "
+        "(set_rsvp, book_bus, post_wish, send_profile_link) riassumi i dati e chiedi conferma; chiama lo strumento solo dopo un sì esplicito. "
+        "In galleria le foto sono dalla più recente: si toccano per ingrandirle e il pulsante in fondo carica le precedenti. "
         "Dopo l'azione conferma in una frase cosa hai fatto. Se manca un dato indispensabile (es. il nome), chiedilo.\n"
         f"Oggi è {_fmt_date(now.date().isoformat())}.\n"
-        + profile_facts(guest) + "\n\n"
+        + profile_facts(guest) + "\n" + access_facts(can_see_memories, graduate_name) + "\n\n"
         "DATI DELLA FESTA\n" + event_facts(event_data, max_seats)
     )
 
@@ -389,6 +463,22 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
                           message=(args.get("message") or "").strip())
             out = wishes_router.create_wish(body, request, db, member)
             return {"summary": f"Augurio di {out['authorName']} per {out['targetGraduate']} pubblicato in bacheca.", "wish": out, "navigate": "wishes"}
+        if name == "get_gift_options":
+            return _gift_options(db, request, args.get("graduate") or "")
+        if name == "read_wishes":
+            allowed, _ = memories_access(request, db)
+            if not allowed:
+                return {"error": "Gli auguri e le foto li vede solo chi è registrato: serve il link personale ricevuto via email (posso mandarlo io con l'email)", "navigate": "wishes"}
+            return _recent_wishes(db, args.get("forGraduate") or "", int(args.get("limit") or 3))
+        if name == "send_profile_link":
+            body = ProfileLinkRequest(email=args.get("email") or "", fullName=args.get("fullName") or "")
+            out = profile_router.request_link(body, request, db)
+            return {"summary": out["message"], "queued": out["queued"]} if out.get("queued") else {"error": out["message"]}
+        if name == "get_my_graduate_summary":
+            graduate_id = graduate_for_token(request, request.headers.get("x-graduate-token"))
+            if not graduate_id:
+                return {"error": "Questa informazione è solo per i festeggiati"}
+            return _graduate_summary(request, db, graduate_id)
         if name == "open_section":
             section = args.get("section")
             if section not in SECTIONS:
@@ -416,14 +506,75 @@ def clean_history(history: list | None) -> list[dict]:
     return out[-MAX_HISTORY:]
 
 
+def _norm(s: str) -> str:
+    import re
+
+    return re.sub(r"^dott\.(ssa)?\s*", "", (s or "").strip().lower())
+
+
+def _match_target(targets: list[GiftTarget], query: str) -> list[GiftTarget]:
+    q = _norm(query)
+    if not q:
+        return targets
+    return [t for t in targets if q in _norm(t.name) or any(part and part in _norm(t.name).split() for part in q.split())]
+
+
+def _gift_options(db: Session, request: Request, graduate: str) -> dict:
+    targets = db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all()
+    found = _match_target(targets, graduate)
+    if graduate and not found:
+        return {"error": f"Non trovo un neo-specialista che si chiami {graduate}"}
+
+    def methods(t: GiftTarget) -> dict:
+        return {
+            "name": t.name, "ibanHolder": t.iban_holder, "iban": t.iban,
+            "paypal": t.paypal_me_url or (f"email {t.paypal_email} (in PayPal: Invia)" if t.paypal_email else ""),
+            "satispay": bool(t.satispay_url), "bancomatPay": t.bancomat_pay,
+        }
+    collectors = [{"name": c.get("name"), "paymentMethods": c.get("paymentMethods", [])} for c in gift_collectors_info(request.app.state.event_data)]
+    return {"graduates": [methods(t) for t in found], "collectors": collectors, "navigate": "gifts",
+            "summary": "Metodi per il regalo diretto: " + "; ".join(
+                f"{t.name}: IBAN" + (", PayPal" if (t.paypal_me_url or t.paypal_email) else "") + (", Satispay" if t.satispay_url else "")
+                + (", BANCOMAT Pay" if t.bancomat_pay else "") for t in found)}
+
+
+def _recent_wishes(db: Session, for_graduate: str, limit: int) -> dict:
+    rows = db.scalars(select(Wish).order_by(Wish.created_at.desc(), Wish.id.desc())).all()
+    if for_graduate:
+        q = _norm(for_graduate)
+        rows = [w for w in rows if q in _norm(w.target_graduate) or any(p and p in _norm(w.target_graduate).split() for p in q.split())]
+    photos = int(db.scalar(select(func.count()).select_from(SharedPhoto)) or 0)
+    return {"count": len(rows), "photos": photos, "navigate": "wishes",
+            "wishes": [{"author": w.author_name, "to": w.target_graduate, "message": w.message[:280], "hearts": w.heart_count} for w in rows[:max(1, min(limit, 5))]]}
+
+
+def _graduate_summary(request: Request, db: Session, graduate_id: str) -> dict:
+    from .routers.graduate import me as graduate_me
+
+    d = graduate_me(request, graduate_id, db, {graduate_id})
+    g = d["guests"]
+    mine = [w for w in d["wishes"] if (w["targetGraduate"] or "").strip().lower() == d["graduate"]["shortName"].lower()]
+    return {
+        "name": d["graduate"]["shortName"], "confirmedGuests": g["confirmedGuests"], "covers": g["covers"],
+        "pendingGuests": g["pendingGuests"], "wishesForMe": d["wishesForMe"], "wishesForAll": len(d["wishes"]) - d["wishesForMe"],
+        "latestForMe": [{"author": w["authorName"], "message": w["message"][:200]} for w in mine[:3]],
+        "busSeatsBooked": d["bus"]["bookedSeats"],
+    }
+
+
 def run_turn(
     client: MistralClient, avatar: AssistantAvatar, user_text: str, history: list[dict],
     request: Request, db: Session, client_id: str | None, guest: Guest | None = None,
 ) -> dict:
     """Un turno di conversazione: ritorna testo di risposta, azioni eseguite e sezione da aprire."""
     max_seats = bus_router.max_seats(request)
-    tools = tools_for(guest)
-    messages: list[dict] = [{"role": "system", "content": system_prompt(avatar, request.app.state.event_data, max_seats, guest=guest)}]
+    graduate_id = graduate_for_token(request, request.headers.get("x-graduate-token"))
+    graduate = db.get(GiftTarget, graduate_id) if graduate_id else None
+    can_see, _ = memories_access(request, db)
+    tools = tools_for(guest, graduate_id)
+    prompt = system_prompt(avatar, request.app.state.event_data, max_seats, guest=guest,
+                           can_see_memories=can_see, graduate_name=graduate.short_name if graduate else None)
+    messages: list[dict] = [{"role": "system", "content": prompt}]
     messages += history
     messages.append({"role": "user", "content": user_text})
     actions: list[dict] = []
