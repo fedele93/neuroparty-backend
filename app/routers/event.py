@@ -10,11 +10,11 @@ from ..models import (
     EventNotification,
     GiftTarget,
     Guest,
-    SharedPhoto,
     Wish,
     now_ms,
 )
 from ..push import subscription_count
+from ..routers.photos import photos_total, recent_photos
 from ..schedule import build_ics
 from ..seed import public_event_info
 from ..state import get_version
@@ -54,7 +54,7 @@ def state(request: Request, db: Session = Depends(get_db)):
         "adminEnabled": bool(request.app.state.settings.admin_token),
         "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.treasurer_tokens),
         # con i token inviati in questa chiamata, il client vede gli elenchi completi di invitati e navetta?
-        "canSeeLists": lists_allowed(request),
+        "canSeeLists": lists_allowed(request, db),
         # foto e auguri: solo invitati registrati (X-Guest-Token) e ruoli
         "canSeeMemories": memories_access(request, db)[0],
         # ruoli sbloccati dai token di questa chiamata (guida del ruolo nella PWA, token sbagliati)
@@ -70,8 +70,10 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
     altrimenti solo i propri record (X-Client-Id o X-Guest-Token). Foto e auguri: solo per gli invitati
     registrati e i ruoli, agli altri arrivano liste vuote (canSeeMemories=false)."""
     base = base_url_for(request)
-    lists = lists_allowed(request)
+    lists = lists_allowed(request, db)
     memories, _ = memories_access(request, db)
+    # foto: solo la prima pagina (le più recenti); le più vecchie si chiedono a /api/photos/page
+    photos, photos_more = recent_photos(db) if memories else ([], False)
     client_id = request.headers.get("x-client-id") or None
     token = (request.headers.get("x-guest-token") or "").strip()
     me = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
@@ -89,7 +91,10 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
         "guests": [g.to_dict() for g in guests],
         "busBookings": [b.to_dict() for b in bookings],
         "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()] if memories else [],
-        "photos": [p.to_dict(base) for p in db.scalars(select(SharedPhoto).order_by(SharedPhoto.created_at.desc())).all()] if memories else [],
+        "photos": [p.to_dict(base) for p in photos],
+        "photosHasMore": photos_more,
+        # il conteggio serve solo se c'è altro oltre la prima pagina
+        "photosTotal": (photos_total(db) if photos_more else len(photos)) if memories else 0,
         # niente importi né elenco delle quote: le quote uniche le vede solo il cassiere (GET /api/gifts/pool)
         "giftTargets": [t.to_dict() for t in db.scalars(select(GiftTarget).order_by(GiftTarget.sort_order.asc())).all()],
         "notifications": [

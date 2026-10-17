@@ -18,6 +18,15 @@ from ..schemas import ProfileLinkRequest
 router = APIRouter(prefix="/api/graduate", tags=["festeggiato"])
 
 
+def graduate_link(request: Request, db: Session, target: GiftTarget, commit: bool = True) -> str:
+    """Il link personale del festeggiato (crea il token la prima volta; poi è sempre lo stesso)."""
+    if not target.access_token:
+        target.access_token = secrets.token_urlsafe(24)
+        if commit:
+            db.commit()
+    return f"{base_url_for(request)}/#festeggiato={target.access_token}"
+
+
 @router.post("/request-link", status_code=202)
 def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depends(get_db)):
     """Manda al festeggiato il link personale (https://<app>/#festeggiato=<token>) se l'email è la sua
@@ -28,11 +37,8 @@ def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depen
         return {"queued": False, "message": "Il server non può inviare email in questo momento: chiedi il token agli organizzatori."}
     target = db.scalars(select(GiftTarget).where(func.lower(GiftTarget.email) == body.email)).first()
     if target is not None:
-        if not target.access_token:
-            target.access_token = secrets.token_urlsafe(24)
-            db.commit()
-        link = f"{base_url_for(request)}/#festeggiato={target.access_token}"
-        subject, text, html = graduate_link_mail(target, link, request.app.state.event_data)
+        link = graduate_link(request, db, target)
+        subject, text, html = graduate_link_mail(target, link, request.app.state.event_data)  # stesse istruzioni dell'invito
         mailer.send("graduate_link", target.email, subject, text, html)
     return {"queued": True, "message": "Se l'email è quella di un festeggiato riceverai il link fra poco: controlla la posta (anche lo spam)."}
 

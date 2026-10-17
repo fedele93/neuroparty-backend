@@ -363,7 +363,28 @@ non nel campo `email` di `giftTargets`: il JSON è pubblico (repository e PWA).
 Con l'email configurata il festeggiato entra anche **senza token**: in ⚙️ → "Sono un festeggiato"
 scrive la sua email (`POST /api/graduate/request-link`) e riceve il link
 `https://<app>/#festeggiato=<token>`, che apre la sua area e vale come `GRADUATE_TOKEN_<ID>`
-(il token è salvato nel database ed è sempre lo stesso; la risposta non rivela se l'email esiste). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
+(il token è salvato nel database ed è sempre lo stesso; la risposta non rivela se l'email esiste).
+
+### Inviti a festeggiati e cassieri, fase di prova
+
+Dal cruscotto organizzatori (`POST /api/admin/invites`, solo `X-Admin-Token`) parte a ciascun
+festeggiato con `GRADUATE_EMAIL_<ID>` il link della sua area e a ciascun cassiere con
+`TREASURER_EMAIL_<ID>` e `TREASURER_TOKEN_<ID>` il link `https://<app>/#cassiere=<token>`, sempre con
+le istruzioni dettagliate (e, se scelto, quelle per la fase di prova). Con `dryRun: true` (default)
+risponde solo con l'elenco di chi riceverebbe cosa: `READY`, `NO_EMAIL`, `NO_TOKEN`.
+
+Finite le prove, `POST /api/admin/reset-test-data` con `{"confirm": "AZZERA"}` cancella invitati e
+profili, navetta, auguri, foto (anche i file), quote uniche, notifiche ed email in coda; restano la
+configurazione, i regali con le coordinate e i link dei festeggiati, gli avatar e le iscrizioni push.
+Fai prima un backup (`scripts/backup.sh`) e imposta `SEED_DEMO_DATA=false`.
+
+### Galleria foto a pagine
+
+Ogni foto caricata ha anche una miniatura (lato lungo 480 px, `thumbUri`) per la galleria; la foto
+intera (`imageUri`, 1600 px) si scarica solo ingrandendola. Le foto già presenti ricevono la miniatura
+al primo avvio. `GET /api/snapshot` porta solo le 24 più recenti (`photosHasMore`, `photosTotal`); le
+precedenti si chiedono a ritroso con `GET /api/photos/page?beforeTs=<createdAt>&beforeId=<id>`
+(paginazione a cursore: niente doppioni anche se nel frattempo arrivano foto nuove). Con `GRADUATE_TOKEN_<ID>` nel `.env` apre
 nella PWA la propria area 🎓 (⚙️ Impostazioni → token festeggiato).
 
 I regali (`giftTargets`) vivono nel database: al riavvio il server aggiunge quelli presenti

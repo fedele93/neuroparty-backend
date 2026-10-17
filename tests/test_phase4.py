@@ -187,3 +187,52 @@ def test_graduate_link_without_mail_says_so(tmp_path):
     with make_client(tmp_path, graduate_emails={"totaro": "dalila@example.org"}) as c:
         r = c.post("/api/graduate/request-link", json={"email": "dalila@example.org"})
         assert r.status_code == 202 and r.json()["queued"] is False and "organizzatori" in r.json()["message"]
+
+
+def test_role_invites_dry_run_and_send(tmp_path):
+    """Cruscotto: inviti con link e istruzioni a festeggiati (GRADUATE_EMAIL_<ID>) e cassieri (TREASURER_EMAIL_<ID> + token)."""
+    import re
+
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n, graduate_emails={"totaro": "dalila@example.org", "carlone": "seba@example.org"},
+                 treasurer_emails={"aki": "aki@example.org"}) as c:
+        assert c.post("/api/admin/invites", json={}).status_code == 403
+        dry = c.post("/api/admin/invites", json={"dryRun": True}, headers=ADMIN).json()
+        by = {(r["role"], r["id"]): r for r in dry["invites"]}
+        assert by[("graduate", "totaro")]["status"] == "READY" and by[("graduate", "totaro")]["email"] == "dalila@example.org"
+        assert by[("graduate", "luisi")]["status"] == "NO_EMAIL"
+        assert by[("treasurer", "aki")]["status"] == "READY" and by[("treasurer", "roberto")]["status"] == "NO_EMAIL"  # ha il token ma non l'email
+        assert dry["ready"] == 3 and _mails(n8n) == []  # anteprima: nessuna email
+        sent = c.post("/api/admin/invites", json={"dryRun": False, "testPhase": True, "ids": ["totaro", "aki"]}, headers=ADMIN).json()
+        assert {(r["role"], r["id"]) for r in sent["invites"]} == {("graduate", "totaro"), ("treasurer", "aki")}
+        mails = _mails(n8n)
+        assert [m["kind"] for m in mails] == ["graduate_link", "treasurer_invite"]
+        assert "fase di prova" in mails[0]["text"].lower() and "Installa" in mails[0]["text"] and "#festeggiato=" in mails[0]["text"]
+        token = re.search(r"#festeggiato=([A-Za-z0-9_-]+)", mails[0]["text"]).group(1)
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token}).json()["graduate"]["id"] == "totaro"
+        assert "#cassiere=tok-aki" in mails[1]["text"] and "Promemoria" in mails[1]["text"] and mails[1]["to"] == "aki@example.org"
+
+
+def test_reset_test_data_keeps_configuration(tmp_path):
+    import io as _io
+
+    from PIL import Image
+
+    n8n = FakeN8n()
+    with _client(tmp_path, n8n, graduate_emails={"totaro": "dalila@example.org"}) as c:
+        buf = _io.BytesIO()
+        Image.new("RGB", (300, 200), (1, 2, 3)).save(buf, "PNG")
+        photo = c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}, headers=ADMIN).json()
+        c.post("/api/graduate/request-link", json={"email": "dalila@example.org"})
+        import re
+        token = re.search(r"#festeggiato=([A-Za-z0-9_-]+)", _mails(n8n)[-1]["text"]).group(1)
+        assert c.post("/api/admin/reset-test-data", json={"confirm": "AZZERA"}).status_code == 403
+        assert c.post("/api/admin/reset-test-data", json={"confirm": "sì"}, headers=ADMIN).status_code == 422
+        r = c.post("/api/admin/reset-test-data", json={"confirm": "azzera"}, headers=ADMIN)
+        assert r.status_code == 200 and r.json()["deleted"]["guests"] >= 7 and r.json()["deleted"]["photos"] >= 4
+        snap = c.get("/api/snapshot", headers=ADMIN).json()
+        assert snap["guests"] == [] and snap["busBookings"] == [] and snap["wishes"] == [] and snap["photos"] == [] and snap["notifications"] == []
+        assert len(snap["giftTargets"]) == 9 and snap["giftTargets"][0]["iban"]  # la configurazione resta
+        assert c.get(photo["imageUri"].replace("https://festa.example.org", "")).status_code == 404  # file cancellati
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token}).status_code == 200  # i link dei festeggiati restano
+        assert c.get("/api/gifts/pool", headers=TREASURER).json()["summary"]["contributions"] == 0

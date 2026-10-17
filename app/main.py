@@ -17,6 +17,7 @@ from .mistral import FakeMistralClient, MistralClient
 from .push import PushService
 from .routers import admin, assistant, automation, bus, event, export, gifts, graduate, guests, mail, notifications, photos, profile, push, wishes
 from .scheduler import run_scheduler
+from .routers.photos import ensure_thumbnails_in_background
 from .seed import apply_graduate_emails, load_event_file, seed_database
 from .validation import placeholder_gift_issues
 from .webhooks import WebhookDispatcher
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             update_gift_texts=settings.gift_sync_update_texts,
         )
         apply_graduate_emails(db, settings.graduate_emails)
+    ensure_thumbnails_in_background(app.state.session_factory, settings.upload_dir, log)
 
     app.state.push = PushService(settings.vapid_key_path, settings.vapid_subject)
 

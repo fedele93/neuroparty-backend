@@ -27,6 +27,11 @@ class Settings:
     treasurer_tokens: dict = field(default_factory=lambda: {
         k[len("TREASURER_TOKEN_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("TREASURER_TOKEN_") and v.strip()
     })
+    # Email del cassiere (facoltativa): TREASURER_EMAIL_<ID>. Serve solo per mandargli dal cruscotto il link
+    # con il suo token (#cassiere=<token>) e le istruzioni. Sta nel .env, non nel JSON pubblico.
+    treasurer_emails: dict = field(default_factory=lambda: {
+        k[len("TREASURER_EMAIL_"):].lower(): v.strip() for k, v in os.environ.items() if k.startswith("TREASURER_EMAIL_") and v.strip()
+    })
     # Token per singolo festeggiato: GRADUATE_TOKEN_<ID> (id del regalo in maiuscolo, es. GRADUATE_TOKEN_LUISI):
     # area festeggiato (chi viene, auguri ricevuti, proprie coordinate) e configurazione del proprio avatar.
     graduate_tokens: dict = field(default_factory=lambda: {

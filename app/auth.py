@@ -136,20 +136,30 @@ def require_treasurer_or_automation(
     raise HTTPException(status_code=403, detail="Token cassiere o automazioni non valido")
 
 
-def graduate_for_token(request: Request, token: str | None) -> str | None:
+def graduate_for_token(request: Request, token: str | None, db: Session | None = None) -> str | None:
     """Id del festeggiato a cui appartiene il token: GRADUATE_TOKEN_<ID> del .env oppure il token del
-    link personale ricevuto via email (salvato nel database). None se non vale."""
+    link personale ricevuto via email (salvato nel database). None se non vale.
+    Il risultato è memorizzato sulla richiesta: chi lo chiede più volte (ruoli, elenchi, foto e auguri,
+    assistente) non rifà la query."""
     token = (token or "").strip()
     if not token:
         return None
-    for graduate_id, expected in request.app.state.settings.graduate_tokens.items():
+    cache = request.state.__dict__.setdefault("_graduate_by_token", {})
+    if token in cache:
+        return cache[token]
+    graduate_id = None
+    for gid, expected in request.app.state.settings.graduate_tokens.items():
         if _matches(token, expected):
-            return graduate_id
-    if len(token) < 20:  # i token dei link sono lunghi: niente query per valori palesemente sbagliati
-        return None
-    with request.app.state.session_factory() as db:
-        target = db.scalars(select(GiftTarget).where(GiftTarget.access_token == token)).first()
-        return target.id if target is not None else None
+            graduate_id = gid
+            break
+    if graduate_id is None and len(token) >= 20:  # i token dei link sono lunghi: niente query per valori palesemente sbagliati
+        if db is not None:
+            graduate_id = db.scalar(select(GiftTarget.id).where(GiftTarget.access_token == token))
+        else:
+            with request.app.state.session_factory() as own:
+                graduate_id = own.scalar(select(GiftTarget.id).where(GiftTarget.access_token == token))
+    cache[token] = graduate_id
+    return graduate_id
 
 
 def graduate_scope(
@@ -200,7 +210,7 @@ def can_modify(owner_client_id: str | None, admin: bool, client_id: str | None) 
 # ---------------------------------------------------------------- elenchi riservati
 
 
-def lists_allowed(request: Request) -> bool:
+def lists_allowed(request: Request, db: Session | None = None) -> bool:
     """True se il chiamante può vedere gli elenchi completi di invitati e prenotazioni navetta:
     organizzatore (ADMIN_TOKEN), festeggiato (GRADUATE_TOKEN_<ID>) o cassiere (TREASURER_TOKEN[_<ID>])."""
     settings = request.app.state.settings
@@ -209,7 +219,7 @@ def lists_allowed(request: Request) -> bool:
         return True
     if treasurer_scope(request, None, h.get("x-treasurer-token")) is not False:
         return True
-    return graduate_for_token(request, h.get("x-graduate-token")) is not None
+    return graduate_for_token(request, h.get("x-graduate-token"), db) is not None
 
 
 def can_see_lists(request: Request) -> bool:
@@ -252,7 +262,7 @@ def memories_access(request: Request, db: Session) -> tuple[bool, Guest | None]:
     guest = db.scalars(select(Guest).where(Guest.access_token == token)).first() if token else None
     if guest is not None:
         return True, guest
-    return lists_allowed(request), None
+    return lists_allowed(request, db), None
 
 
 def require_member(request: Request, db: Session = Depends(get_db)) -> Guest | None:

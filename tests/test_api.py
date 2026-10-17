@@ -659,3 +659,58 @@ def test_iban_validation_detects_placeholders():
     for c in data["giftCollectors"]:
         c["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     assert len(placeholder_gift_issues(data)) == len([t for t in data["giftTargets"][1:] if not iban_is_valid(t["iban"])])
+
+
+def test_photo_gallery_newest_first_pages_and_thumbnails(client):
+    """Galleria dalla più recente; lo snapshot manda la prima pagina, le altre arrivano a ritroso da /api/photos/page;
+    ogni foto caricata ha la miniatura leggera (thumbUri) oltre alla foto intera (imageUri)."""
+    from app.routers.photos import PAGE_SIZE
+
+    def png(color):
+        buf = io.BytesIO()
+        Image.new("RGB", (2000, 1200), color).save(buf, "PNG")
+        return buf.getvalue()
+
+    ids = []
+    for i in range(PAGE_SIZE + 5):  # più di una pagina (3 foto demo + queste)
+        r = client.post("/api/photos", files={"file": (f"f{i}.png", png((i * 7 % 255, 40, 90)), "image/png")}, data={"caption": f"n{i}"}, headers=ADMIN)
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+    p = client.get("/api/photos", headers=ADMIN).json()[0]
+    assert p["id"] == ids[-1] and p["thumbUri"].endswith("_t.jpg") and p["imageUri"].endswith(".jpg") and p["thumbUri"] != p["imageUri"]
+    w, h = Image.open(io.BytesIO(client.get(p["thumbUri"].replace("https://festa.example.org", "")).content)).size
+    assert max(w, h) == 480
+
+    snap = client.get("/api/snapshot", headers=ADMIN).json()
+    assert len(snap["photos"]) == PAGE_SIZE and snap["photosHasMore"] is True
+    assert [x["id"] for x in snap["photos"]][:3] == [ids[-1], ids[-2], ids[-3]]  # più recente in alto
+    seen = [x["id"] for x in snap["photos"]]
+    last = snap["photos"][-1]
+    while True:
+        page = client.get(f"/api/photos/page?limit=10&beforeTs={last['createdAt']}&beforeId={last['id']}", headers=ADMIN).json()
+        seen += [x["id"] for x in page["photos"]]
+        if not page["hasMore"]:
+            break
+        last = page["photos"][-1]
+    all_ids = [x["id"] for x in client.get("/api/photos", headers=ADMIN).json()]
+    assert seen == all_ids and len(seen) == len(set(seen)) == page["total"] == PAGE_SIZE + 5 + 3  # nessun doppione, nessuna mancante
+    assert client.get("/api/photos/page").status_code == 401  # come la galleria: solo registrati e ruoli
+    # la foto cancellata porta via anche la miniatura
+    thumb = p["thumbUri"].replace("https://festa.example.org", "")
+    assert client.delete(f"/api/photos/{p['id']}", headers=ADMIN).status_code == 204
+    assert client.get(thumb).status_code == 404
+
+
+def test_thumbnails_backfilled_on_start(tmp_path):
+    """Le foto caricate prima delle miniature le ricevono al riavvio."""
+    with make_client(tmp_path) as c:
+        buf = io.BytesIO()
+        Image.new("RGB", (900, 900), (10, 200, 10)).save(buf, "PNG")
+        pid = c.post("/api/photos", files={"file": ("a.png", buf.getvalue(), "image/png")}, headers=ADMIN).json()["id"]
+        from app.models import SharedPhoto
+        with c.app.state.session_factory() as db:
+            db.get(SharedPhoto, pid).thumb_path = ""
+            db.commit()
+    with make_client(tmp_path) as c:
+        p = next(x for x in c.get("/api/photos", headers=ADMIN).json() if x["id"] == pid)
+        assert p["thumbUri"].endswith("_t.jpg")
