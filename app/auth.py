@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .deps import get_db
-from .models import GiftTarget, Guest
+from .models import GiftCollectorToken, GiftTarget, Guest
 
 
 def get_client_id(x_client_id: str | None = Header(default=None)) -> str | None:
@@ -84,10 +84,33 @@ def treasurer_scope(
     settings = request.app.state.settings
     if _matches(x_treasurer_token, settings.treasurer_token):
         return None
-    for collector_id, token in settings.treasurer_tokens.items():
-        if _matches(x_treasurer_token, token):
-            return {collector_id}
-    return False
+    collector_id = treasurer_for_token(request, x_treasurer_token)
+    return {collector_id} if collector_id else False
+
+
+def treasurer_for_token(request: Request, token: str | None, db: Session | None = None) -> str | None:
+    """Id del cassiere a cui appartiene il token: TREASURER_TOKEN_<ID> del .env oppure il link personale
+    (#cassiere=<token>) salvato nel database. None se non vale. Memorizzato sulla richiesta."""
+    return _owner_for_token(request, token, db, "_treasurer_by_token", request.app.state.settings.treasurer_tokens,
+                            select(GiftCollectorToken.collector_id).where(GiftCollectorToken.access_token == token))
+
+
+def _owner_for_token(request: Request, token: str | None, db: Session | None, cache_key: str, env_tokens: dict, query) -> str | None:
+    token = (token or "").strip()
+    if not token:
+        return None
+    cache = request.state.__dict__.setdefault(cache_key, {})
+    if token in cache:
+        return cache[token]
+    owner = next((oid for oid, expected in env_tokens.items() if _matches(token, expected)), None)
+    if owner is None and len(token) >= 20:  # i token dei link sono lunghi: niente query per valori palesemente sbagliati
+        if db is not None:
+            owner = db.scalar(query)
+        else:
+            with request.app.state.session_factory() as own:
+                owner = own.scalar(query)
+    cache[token] = owner
+    return owner
 
 
 def is_treasurer(
@@ -98,8 +121,20 @@ def is_treasurer(
     return treasurer_scope(request, x_admin_token, x_treasurer_token) is not False
 
 
-def _any_treasurer_token(settings) -> bool:
-    return bool(settings.treasurer_token or settings.treasurer_tokens)
+def treasurers_enabled(request: Request, db: Session | None = None) -> bool:
+    """C'è un modo per i cassieri di entrare? Token nel .env oppure link personali già generati."""
+    settings = request.app.state.settings
+    if settings.treasurer_token or settings.treasurer_tokens:
+        return True
+    q = select(GiftCollectorToken.collector_id).limit(1)
+    if db is not None:
+        return db.scalar(q) is not None
+    with request.app.state.session_factory() as own:
+        return own.scalar(q) is not None
+
+
+def _any_treasurer_token(settings, request: Request | None = None) -> bool:
+    return bool(settings.treasurer_token or settings.treasurer_tokens) if request is None else treasurers_enabled(request)
 
 
 def require_treasurer(
@@ -110,7 +145,7 @@ def require_treasurer(
     """Endpoint del cassiere delle quote uniche: TREASURER_TOKEN oppure TREASURER_TOKEN_<ID>.
     Ritorna i cassieri visibili (None = tutti)."""
     settings = request.app.state.settings
-    if not _any_treasurer_token(settings):
+    if not _any_treasurer_token(settings, request):
         raise HTTPException(status_code=503, detail="TREASURER_TOKEN non configurato sul server")
     scope = treasurer_scope(request, x_admin_token, x_treasurer_token)
     if scope is False:
@@ -131,7 +166,7 @@ def require_treasurer_or_automation(
         return scope
     if _matches(x_automation_token, settings.automation_token):
         return None
-    if not (_any_treasurer_token(settings) or settings.automation_token):
+    if not (_any_treasurer_token(settings, request) or settings.automation_token):
         raise HTTPException(status_code=503, detail="Nessun token configurato sul server")
     raise HTTPException(status_code=403, detail="Token cassiere o automazioni non valido")
 
@@ -141,25 +176,8 @@ def graduate_for_token(request: Request, token: str | None, db: Session | None =
     link personale ricevuto via email (salvato nel database). None se non vale.
     Il risultato è memorizzato sulla richiesta: chi lo chiede più volte (ruoli, elenchi, foto e auguri,
     assistente) non rifà la query."""
-    token = (token or "").strip()
-    if not token:
-        return None
-    cache = request.state.__dict__.setdefault("_graduate_by_token", {})
-    if token in cache:
-        return cache[token]
-    graduate_id = None
-    for gid, expected in request.app.state.settings.graduate_tokens.items():
-        if _matches(token, expected):
-            graduate_id = gid
-            break
-    if graduate_id is None and len(token) >= 20:  # i token dei link sono lunghi: niente query per valori palesemente sbagliati
-        if db is not None:
-            graduate_id = db.scalar(select(GiftTarget.id).where(GiftTarget.access_token == token))
-        else:
-            with request.app.state.session_factory() as own:
-                graduate_id = own.scalar(select(GiftTarget.id).where(GiftTarget.access_token == token))
-    cache[token] = graduate_id
-    return graduate_id
+    return _owner_for_token(request, token, db, "_graduate_by_token", request.app.state.settings.graduate_tokens,
+                            select(GiftTarget.id).where(GiftTarget.access_token == (token or "").strip()))
 
 
 def graduate_scope(

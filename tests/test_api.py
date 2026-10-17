@@ -712,5 +712,6 @@ def test_thumbnails_backfilled_on_start(tmp_path):
             db.get(SharedPhoto, pid).thumb_path = ""
             db.commit()
     with make_client(tmp_path) as c:
+        c.app.state.thumbnail_thread.join(timeout=10)  # le miniature si creano in background: qui aspettiamo
         p = next(x for x in c.get("/api/photos", headers=ADMIN).json() if x["id"] == pid)
         assert p["thumbUri"].endswith("_t.jpg")

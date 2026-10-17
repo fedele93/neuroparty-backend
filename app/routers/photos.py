@@ -99,19 +99,21 @@ def ensure_thumbnails(db: Session, upload_dir: str) -> int:
     return made
 
 
-def ensure_thumbnails_in_background(session_factory, upload_dir: str, log) -> None:
+def ensure_thumbnails_in_background(session_factory, upload_dir: str, log) -> threading.Thread | None:
     """All'avvio: se ci sono foto senza miniatura le crea in un thread, senza ritardare le prime richieste
-    (nel frattempo la galleria usa la foto intera)."""
+    (nel frattempo la galleria usa la foto intera). Ritorna il thread, None se non c'è nulla da fare."""
     with session_factory() as db:
         missing = db.scalar(select(func.count()).select_from(SharedPhoto).where(SharedPhoto.thumb_path == "", SharedPhoto.image_path != "")) or 0
     if not missing:
-        return
+        return None
 
     def work() -> None:
         with session_factory() as db:
             log.info("Create %d miniature per le foto già caricate", ensure_thumbnails(db, upload_dir))
 
-    threading.Thread(target=work, name="thumbnails", daemon=True).start()
+    thread = threading.Thread(target=work, name="thumbnails", daemon=True)
+    thread.start()
+    return thread
 
 
 @router.get("", dependencies=[Depends(require_member)])

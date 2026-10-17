@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import lists_allowed, memories_access, roles_for
+from ..auth import lists_allowed, memories_access, roles_for, treasurers_enabled
 from ..deps import base_url_for, get_db
 from ..models import (
     BusBooking,
@@ -52,7 +52,7 @@ def state(request: Request, db: Session = Depends(get_db)):
         "version": get_version(db),
         "serverTime": now_ms(),
         "adminEnabled": bool(request.app.state.settings.admin_token),
-        "treasurerEnabled": bool(request.app.state.settings.treasurer_token or request.app.state.settings.treasurer_tokens),
+        "treasurerEnabled": treasurers_enabled(request, db),
         # con i token inviati in questa chiamata, il client vede gli elenchi completi di invitati e navetta?
         "canSeeLists": lists_allowed(request, db),
         # foto e auguri: solo invitati registrati (X-Guest-Token) e ruoli

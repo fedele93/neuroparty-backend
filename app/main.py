@@ -67,7 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             update_gift_texts=settings.gift_sync_update_texts,
         )
         apply_graduate_emails(db, settings.graduate_emails)
-    ensure_thumbnails_in_background(app.state.session_factory, settings.upload_dir, log)
+    app.state.thumbnail_thread = ensure_thumbnails_in_background(app.state.session_factory, settings.upload_dir, log)
 
     app.state.push = PushService(settings.vapid_key_path, settings.vapid_subject)
 

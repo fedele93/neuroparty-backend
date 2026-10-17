@@ -369,9 +369,12 @@ scrive la sua email (`POST /api/graduate/request-link`) e riceve il link
 
 Dal cruscotto organizzatori (`POST /api/admin/invites`, solo `X-Admin-Token`) parte a ciascun
 festeggiato con `GRADUATE_EMAIL_<ID>` il link della sua area e a ciascun cassiere con
-`TREASURER_EMAIL_<ID>` e `TREASURER_TOKEN_<ID>` il link `https://<app>/#cassiere=<token>`, sempre con
-le istruzioni dettagliate (e, se scelto, quelle per la fase di prova). Con `dryRun: true` (default)
-risponde solo con l'elenco di chi riceverebbe cosa: `READY`, `NO_EMAIL`, `NO_TOKEN`.
+`TREASURER_EMAIL_<ID>` il link `https://<app>/#cassiere=<token>`, sempre con le istruzioni dettagliate
+(e, se scelto, quelle per la fase di prova). Il token del cassiere è generato nel database
+(`gift_collector_tokens`) come quello dei festeggiati e vale come `TREASURER_TOKEN_<ID>`: i token del
+`.env` non servono più, ma restano validi. Con `rotate: true` i link vengono rigenerati prima dell'invio
+e quelli vecchi smettono di valere (revoca). Con `dryRun: true` (default) risponde solo con l'elenco di
+chi riceverebbe cosa: `READY`, `NO_EMAIL`.
 
 Finite le prove, `POST /api/admin/reset-test-data` con `{"confirm": "AZZERA"}` cancella invitati e
 profili, navetta, auguri, foto (anche i file), quote uniche, notifiche ed email in coda; restano la

@@ -393,6 +393,16 @@ class PushSubscription(Base):
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 
+class GiftCollectorToken(Base):
+    """Link personale del cassiere (https://<app>/#cassiere=<token>), mandato dal cruscotto: vale come
+    TREASURER_TOKEN_<ID> e si può rigenerare (il vecchio link smette di valere). I cassieri stanno nel JSON,
+    qui c'è solo il loro accesso."""
+    __tablename__ = "gift_collector_tokens"
+    collector_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    access_token: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
 class Meta(Base):
     """Coppie chiave/valore (versione dei dati, flag di seed...)."""
     __tablename__ = "meta"
