@@ -15,7 +15,7 @@ def test_health_and_event(client):
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
-    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal"]  # Aki: niente contanti
+    assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
 
 
 def test_demo_seed_matches_json(client):
@@ -187,8 +187,6 @@ def test_pool_equal_split(client):
     r = client.post("/api/gifts/pool", json={"donorName": "Cugina", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "PayPal"})
     assert r.status_code == 201 and r.json()["collectorName"] == "Dott. Akilesh Bhunjun"
     assert client.post("/api/gifts/pool", json={"donorName": "X", "totalAmount": 45, "collectorId": "nessuno"}).status_code == 404
-    # Aki non accetta contanti
-    assert client.post("/api/gifts/pool", json={"donorName": "Y", "totalAmount": 45, "collectorId": "aki", "paymentMethod": "Contanti"}).status_code == 422
 
     # solo alcuni neo-specialisti (es. escludo me stesso)
     r = client.post("/api/gifts/pool", json={"donorName": "Fedele", "totalAmount": 80, "graduateIds": ["carlone", "totaro"]})
