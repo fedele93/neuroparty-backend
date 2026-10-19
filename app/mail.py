@@ -326,7 +326,8 @@ def pool_mail(kind: str, contribution, collector: dict, app_url: str) -> tuple[s
     parts = ", ".join(f"{a.graduate_name} {a.amount:.2f} €".replace(".", ",") for a in contribution.allocations)
     how = {
         "IBAN": f"Bonifico a {collector.get('ibanHolder') or collector.get('name')}, IBAN {collector.get('iban')}, causale: {reason}",
-        "PayPal": f"PayPal: {collector.get('paypalMeUrl')} (indica il tuo nome nel messaggio)",
+        "PayPal": (f"PayPal: {collector.get('paypalMeUrl')} (indica il tuo nome nel messaggio)" if collector.get("paypalMeUrl")
+                   else f"PayPal: in PayPal scegli Invia a {collector.get('paypalContact')} (indica il tuo nome nel messaggio)"),
         "Contanti": f"Consegna i contanti a {collector.get('name')} (in reparto o alla festa)",
     }.get(contribution.payment_method, "")
     if kind == "pool_reminder":

@@ -16,6 +16,8 @@ def test_health_and_event(client):
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
     assert ev["giftCollectors"][1]["name"] == "Dott. Akilesh Bhunjun" and ev["giftCollectors"][1]["paymentMethods"] == ["IBAN", "PayPal", "Contanti"]
+    roberto = ev["giftCollectors"][0]
+    assert roberto["iban"].startswith("IT89") and roberto["paypalMeUrl"] == "" and roberto["paypalContact"] == "+39 348 276 7437"
 
 
 def test_demo_seed_matches_json(client):
@@ -651,8 +653,8 @@ def test_iban_validation_detects_placeholders():
         data = json.load(f)
     issues = placeholder_gift_issues(data)
     fake_targets = [t for t in data["giftTargets"] if not iban_is_valid(t["iban"])]
-    assert len(issues) == len(fake_targets) + 1  # i regali con IBAN segnaposto, più il cassiere Roberto (Aki ha l'IBAN vero)
-    assert issues[0].startswith("cassiere 'roberto'") and not any(i.startswith("cassiere 'aki'") for i in issues)
+    assert len(issues) == len(fake_targets)  # tutti i cassieri hanno l'IBAN vero
+    assert not any(i.startswith("cassiere") for i in issues)
     data["giftTargets"][0]["iban"] = "IT60 X054 2811 1010 0000 0123 456"
     for c in data["giftCollectors"]:
         c["iban"] = "IT60 X054 2811 1010 0000 0123 456"
