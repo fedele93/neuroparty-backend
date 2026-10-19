@@ -112,7 +112,9 @@ async def talk(
     avatarId: str = Form(...),
     text: str = Form(default=""),
     history: str = Form(default="[]"),
-    wantAudio: bool = Form(default=True),
+    # stringa, non bool: da FastAPI 0.149 un campo bool assente nel form vale False anche con default=True,
+    # e le app non lo inviano (vogliono sempre la voce). Vuoto/assente = sì; "false", "0", "no" = no.
+    wantAudio: str | None = Form(default=None),
     audio: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
@@ -155,7 +157,8 @@ async def talk(
     except MistralError as e:
         raise HTTPException(502, f"Assistente non disponibile: {e}") from e
 
-    audio_b64, mime = _speak(request, turn["reply"], avatar) if wantAudio else (None, None)
+    want_audio = (wantAudio or "").strip().lower() not in ("false", "0", "no", "off")
+    audio_b64, mime = _speak(request, turn["reply"], avatar) if want_audio else (None, None)
     return {
         "avatarId": avatar.id,
         "transcript": transcript,
