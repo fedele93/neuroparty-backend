@@ -289,3 +289,11 @@ def test_new_tools_gifts_wishes_link_and_graduate(tmp_path):
             locked = system_prompt(av, app.state.event_data, 54, can_see_memories=False)
             assert "NON è registrato" in locked and "send_profile_link" in locked
             assert "uno dei festeggiati" in system_prompt(av, app.state.event_data, 54, graduate_name="Fedele Luisi")
+
+
+def test_audio_is_on_unless_explicitly_refused(bot):
+    """Le app non mandano wantAudio: la voce deve esserci lo stesso (regressione con FastAPI >= 0.149, dove un
+    campo bool assente nel form vale False). Solo wantAudio=false la toglie."""
+    assert bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "ciao"}).json()["audioMime"] == "audio/wav"
+    assert bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "ciao", "wantAudio": "true"}).json()["audioMime"] == "audio/wav"
+    assert bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "ciao", "wantAudio": "false"}).json()["audioMime"] is None
