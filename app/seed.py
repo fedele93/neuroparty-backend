@@ -40,6 +40,7 @@ COLLECTOR_DEFAULTS = {
     "iban": "",
     "ibanHolder": "",
     "paypalMeUrl": "",
+    "paypalContact": "",  # PayPal senza link paypal.me: email o numero di telefono a cui inviare
     "paymentMethods": ["IBAN", "PayPal", "Contanti"],
     "transferReason": "Regalo specializzazione Neurologia",
 }
