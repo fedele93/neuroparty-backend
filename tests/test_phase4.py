@@ -179,7 +179,7 @@ def test_graduate_link_by_email(tmp_path):
         assert other.json()["message"] == r.json()["message"] and len(_mails(n8n)) == 2
         assert c.post("/api/graduate/request-link", json={"email": "non-una-mail"}).status_code == 422
         # token sbagliato: niente area, niente elenchi
-        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token[:-1] + "x"}).status_code == 403
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": token[:-1] + ("y" if token[-1] == "x" else "x")}).status_code == 403
         assert c.get("/api/state", headers={"X-Graduate-Token": "x" * 30}).json()["roles"]["graduate"] is None
 
 
