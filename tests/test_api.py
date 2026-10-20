@@ -153,7 +153,8 @@ def test_gift_targets_hide_amounts_and_pool_is_private(client):
     for t in targets:
         assert "collectedAmount" not in t and "targetAmount" not in t
         assert t["iban"] and "paypalMeUrl" in t and "satispayUrl" in t and "bancomatPay" in t  # PayPal, Satispay e BANCOMAT Pay facoltativi
-    assert targets[0]["bancomatPay"] == "3469556702" and targets[1]["bancomatPay"] == ""  # solo Luisi ha BANCOMAT Pay
+    assert targets[0]["bancomatPay"] == "3469556702" and targets[1]["bancomatPay"] == ""  # BANCOMAT Pay solo per chi lo usa
+    assert next(t for t in targets if t["id"] == "prezioso")["bancomatPay"] == "3889861472"
     cusmai = next(t for t in targets if t["id"] == "cusmai")
     assert cusmai["paypalEmail"] == "francescocusmai96@gmail.com" and cusmai["paypalMeUrl"] == ""  # PayPal via email
     collector = client.get("/api/gifts/collector").json()
