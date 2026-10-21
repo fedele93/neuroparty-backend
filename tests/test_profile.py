@@ -68,8 +68,39 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         r = c.post("/api/profile/request-link", json={"email": "zia.pina@example.org"})
         assert r.status_code == 202 and r.json()["created"] is False and r.json()["queued"] is True
         assert "#profilo=" + token in _mail_events(n8n)[-1]["text"]  # stesso token finché non si esce
+        # codice a 6 cifre nell'email (per l'app installata su iPhone): un nuovo link ne manda uno nuovo
+        code = _mail_events(n8n)[-1]["text"].split("codice: ")[1].split()[0]
+        first_code = mails[0]["text"].split("codice: ")[1].split()[0]
+        assert len(code) == 6 and code.isdigit() and code in _mail_events(n8n)[-1]["html"]
+        V = "/api/profile/verify-code"
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": first_code}).status_code == 401 or first_code == code
+        assert c.post(V, json={"email": "nessuno@example.org", "code": code}).status_code == 401  # email sconosciuta: stessa risposta
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": "12"}).status_code == 401
+        r = c.post(V, json={"email": "Zia.Pina@example.org", "code": code[:3] + " " + code[3:]})  # spazi e maiuscole tollerati
+        assert r.status_code == 200 and r.json()["token"] == token
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": code}).status_code == 401  # vale una volta sola
+        # cinque tentativi sbagliati bruciano il codice
+        c.post("/api/profile/request-link", json={"email": "zia.pina@example.org"})
+        code = _mail_events(n8n)[-1]["text"].split("codice: ")[1].split()[0]
+        wrong = "000000" if code != "000000" else "111111"
+        for _ in range(5):
+            assert c.post(V, json={"email": "zia.pina@example.org", "code": wrong}).status_code == 401
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": code}).status_code == 401
+        # scaduto
+        c.post("/api/profile/request-link", json={"email": "zia.pina@example.org"})
+        code = _mail_events(n8n)[-1]["text"].split("codice: ")[1].split()[0]
+        with c.app.state.session_factory() as db:
+            from app.models import Guest
+            g = db.query(Guest).filter(Guest.email == "zia.pina@example.org").one()
+            g.login_code_expires_at = 1
+            db.commit()
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": code}).status_code == 401
+        # il logout annulla anche un codice in corso
+        c.post("/api/profile/request-link", json={"email": "zia.pina@example.org"})
+        code = _mail_events(n8n)[-1]["text"].split("codice: ")[1].split()[0]
         assert c.post("/api/profile/logout", headers=H).json()["ok"] is True
         assert c.get("/api/profile", headers=H).status_code == 401
+        assert c.post(V, json={"email": "zia.pina@example.org", "code": code}).status_code == 401
         # email sconosciuta senza nome: risposta neutra, nessuna email
         before = len(_mail_events(n8n))
         r = c.post("/api/profile/request-link", json={"email": "nessuno@example.org"})

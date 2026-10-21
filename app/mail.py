@@ -91,6 +91,11 @@ def _button(url: str, label: str) -> str:
             f'padding:12px 18px;border-radius:12px;font-weight:700;display:inline-block;">{html_lib.escape(label)}</a></p>')
 
 
+
+# Validità del codice di accesso a 6 cifre spedito con il link personale (vedi routers/profile.py).
+LOGIN_CODE_MINUTES = 15
+
+
 def first_name(full_name: str) -> str:
     import re
 
@@ -98,15 +103,29 @@ def first_name(full_name: str) -> str:
     return name.split(" ")[0] if name else "ciao"
 
 
-def access_link_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, str, str]:
+def access_link_mail(guest: Guest, link: str, event_data: dict, code: str = "") -> tuple[str, str, str]:
+    """Email con il link personale e, se c'è, il codice a 6 cifre per chi ha l'app installata sull'iPhone
+    (lì il link si apre in Safari e non nell'app: il codice si digita dentro l'app)."""
     ev = event_summary(event_data)
     subject = f"Il tuo link personale per {ev['title']}"
+    code_txt = (
+        f"\n\nHai aggiunto l'app alla schermata Home dell'iPhone? Lì il link si apre in Safari e non nell'app: "
+        f"apri l'app, tocca \"Accedi con la tua email\" e inserisci questo codice: {code} (vale {LOGIN_CODE_MINUTES} minuti)."
+        if code else ""
+    )
     text = (
         f"Ciao {first_name(guest.full_name)},\n\n"
         f"ecco il tuo link personale per la festa di specializzazione ({ev['partyDate']}"
         f"{', ' + ev['location'] if ev['location'] else ''}).\n"
-        f"Da qui confermi la partecipazione, indichi chi viene con te e il menu, e trovi tutto il resto:\n\n{link}\n\n"
+        f"Da qui confermi la partecipazione, indichi chi viene con te e il menu, e trovi tutto il resto:\n\n{link}{code_txt}\n\n"
         "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.\n\nA presto!"
+    )
+    code_html = (
+        f'<p style="font-size:13px;color:#5B6677;margin-top:18px;">Hai aggiunto l\'app alla schermata Home dell\'iPhone? '
+        f'Lì il link si apre in Safari e non nell\'app: apri l\'app, tocca <b>Accedi con la tua email</b> e inserisci questo codice '
+        f'(vale {LOGIN_CODE_MINUTES} minuti):</p>'
+        f'<p style="font-size:26px;letter-spacing:6px;font-weight:700;color:#0A192F;margin:4px 0 0;">{html_lib.escape(code)}</p>'
+        if code else ""
     )
     body = (
         f"<p>Ciao {html_lib.escape(first_name(guest.full_name))},</p>"
@@ -114,6 +133,7 @@ def access_link_mail(guest: Guest, link: str, event_data: dict) -> tuple[str, st
         f"{', ' + html_lib.escape(ev['location']) if ev['location'] else ''}). Da qui confermi la partecipazione, indichi chi viene con te e il menu, e trovi tutto il resto.</p>"
         + _button(link, "Apri il mio profilo")
         + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+        + code_html
     )
     return subject, text, _layout("Il tuo link personale", body, "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.")
 

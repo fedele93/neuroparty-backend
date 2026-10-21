@@ -31,6 +31,11 @@ class Guest(Base):
     token_created_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     consent_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_login_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # codice a 6 cifre spedito insieme al link: serve a chi ha l'app installata sull'iPhone, dove il link
+    # dell'email si apre in Safari e non nell'app (memorie separate). Solo l'hash, con scadenza e tentativi.
+    login_code_hash: Mapped[str] = mapped_column(String(64), default="")
+    login_code_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    login_code_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
     @property
     def companions(self) -> list[dict]:
