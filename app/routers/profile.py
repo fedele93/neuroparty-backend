@@ -8,15 +8,13 @@
 
 Il codice serve a chi ha aggiunto l'app alla schermata Home dell'iPhone: lì il link dell'email si apre
 in Safari, che non condivide la memoria con l'app installata, quindi il token non arriverebbe mai
-dentro l'app. Il codice si digita nell'app e vale LOGIN_CODE_MINUTES minuti, per pochi tentativi.
+dentro l'app. Il codice si digita nell'app e vale pochi minuti, per pochi tentativi (vedi app/login_code.py).
 
 Il link è https://<app>/#profilo=<token>: la PWA lo legge, salva il token sul dispositivo e da
 quel momento manda X-Guest-Token. Gli organizzatori generano e inviano i link da /api/guests.
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import secrets
 
@@ -26,7 +24,8 @@ from sqlalchemy.orm import Session
 
 from ..deadlines import deadline_passed, deadlines_info
 from ..deps import base_url_for, get_db
-from ..mail import LOGIN_CODE_MINUTES, access_link_mail, bus_mail, rsvp_confirmation_mail
+from ..login_code import check_login_code, clear_login_code, issue_login_code
+from ..mail import access_link_mail, bus_mail, rsvp_confirmation_mail
 from ..models import BusBooking, Guest, now_ms
 from ..routers import bus as bus_router
 from ..routers.guests import guests_summary
@@ -58,35 +57,13 @@ def find_by_email(db: Session, email: str) -> Guest | None:
     return db.scalars(select(Guest).where(func.lower(Guest.email) == email).order_by(Guest.id.asc())).first()
 
 
-LOGIN_CODE_MAX_ATTEMPTS = 5
-
-
-def _code_hash(code: str) -> str:
-    return hashlib.sha256(code.encode()).hexdigest()
-
-
-def new_login_code(guest: Guest) -> str:
-    """Nuovo codice a 6 cifre per l'invitato: nel database resta solo l'hash, con scadenza e tentativi azzerati."""
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    guest.login_code_hash = _code_hash(code)
-    guest.login_code_expires_at = now_ms() + LOGIN_CODE_MINUTES * 60_000
-    guest.login_code_attempts = 0
-    return code
-
-
-def clear_login_code(guest: Guest) -> None:
-    guest.login_code_hash = ""
-    guest.login_code_expires_at = None
-    guest.login_code_attempts = 0
-
-
 def send_access_link(request: Request, db: Session, guest: Guest) -> dict | None:
     """Email con il link personale e il codice a 6 cifre (richiede un'email nel profilo). Ritorna la riga
     dell'outbox o None."""
     if not guest.email:
         return None
     token = ensure_token(guest)
-    code = new_login_code(guest)
+    code = issue_login_code(guest)
     db.commit()
     subject, text, html = access_link_mail(guest, profile_link(request, token), request.app.state.event_data, code=code)
     return request.app.state.mailer.send("access_link", guest.email, subject, text, html, guest_id=guest.id)
@@ -150,22 +127,11 @@ def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depen
 def verify_code(body: ProfileCodeVerify, db: Session = Depends(get_db)):
     """Scambia email + codice a 6 cifre con il token del profilo (stesso token del link). Il codice vale
     una volta sola: giusto o esaurito, si cancella. La risposta non rivela se l'email esiste."""
-    bad = HTTPException(401, "Codice non valido o scaduto: richiedi un nuovo link con la tua email")
     guest = find_by_email(db, body.email)
-    if guest is None or not guest.login_code_hash or len(body.code) != 6:
-        raise bad
-    if (guest.login_code_expires_at or 0) < now_ms():
-        clear_login_code(guest)
-        db.commit()
-        raise bad
-    if not hmac.compare_digest(guest.login_code_hash, _code_hash(body.code)):
-        guest.login_code_attempts += 1
-        if guest.login_code_attempts >= LOGIN_CODE_MAX_ATTEMPTS:
-            clear_login_code(guest)
-        db.commit()
-        raise bad
+    if not check_login_code(guest, body.code):
+        db.commit()  # tentativo contato, oppure codice scaduto o esaurito
+        raise HTTPException(401, "Codice non valido o scaduto: richiedi un nuovo link con la tua email")
     token = ensure_token(guest)
-    clear_login_code(guest)
     guest.last_login_at = now_ms()
     db.commit()
     return {"token": token}

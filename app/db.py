@@ -40,6 +40,12 @@ ADDED_COLUMNS = {
     "gift_targets": {
         "email": "VARCHAR(200) NOT NULL DEFAULT ''", "access_token": "VARCHAR(64)",
         "bancomat_pay": "VARCHAR(30) NOT NULL DEFAULT ''", "paypal_email": "VARCHAR(200) NOT NULL DEFAULT ''",
+        "login_code_hash": "VARCHAR(64) NOT NULL DEFAULT ''", "login_code_expires_at": "INTEGER",
+        "login_code_attempts": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "gift_collector_tokens": {
+        "login_code_hash": "VARCHAR(64) NOT NULL DEFAULT ''", "login_code_expires_at": "INTEGER",
+        "login_code_attempts": "INTEGER NOT NULL DEFAULT 0",
     },
     "bus_bookings": {
         "guest_id": "INTEGER", "status": "VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED'", "code": "VARCHAR(16) NOT NULL DEFAULT ''",

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_admin
 from ..deadlines import deadlines_info
 from ..deps import base_url_for, get_db
+from ..login_code import issue_login_code
 from ..mail import graduate_link_mail, treasurer_invite_mail
 from ..models import (
     AssistantAvatar, BusBooking, EventNotification, GiftCollectorToken, GiftPoolAllocation, GiftPoolContribution,
@@ -103,9 +104,9 @@ class InvitesIn(BaseModel):
     rotate: bool = False
 
 
-def collector_link(request: Request, db: Session, collector_id: str, rotate: bool = False) -> str:
-    """Il link personale del cassiere (#cassiere=<token>): generato nel database la prima volta, poi sempre lo
-    stesso; con rotate ne crea uno nuovo. Vale come TREASURER_TOKEN_<ID>. Senza commit: lo fa chi chiama."""
+def collector_token_row(db: Session, collector_id: str, rotate: bool = False) -> GiftCollectorToken:
+    """L'accesso del cassiere nel database: creato la prima volta, poi sempre lo stesso; con rotate il token
+    cambia (il vecchio link smette di valere). Senza commit: lo fa chi chiama."""
     row = db.get(GiftCollectorToken, collector_id)
     if row is None:
         row = GiftCollectorToken(collector_id=collector_id, access_token=secrets.token_urlsafe(24))
@@ -113,7 +114,19 @@ def collector_link(request: Request, db: Session, collector_id: str, rotate: boo
     elif rotate:
         row.access_token = secrets.token_urlsafe(24)
         row.created_at = now_ms()
-    return f"{base_url_for(request)}/#cassiere={row.access_token}"
+    return row
+
+
+def collector_link(request: Request, db: Session, collector_id: str, rotate: bool = False) -> str:
+    """Il link personale del cassiere (#cassiere=<token>). Vale come TREASURER_TOKEN_<ID>. Senza commit."""
+    return f"{base_url_for(request)}/#cassiere={collector_token_row(db, collector_id, rotate).access_token}"
+
+
+def _treasurer_invite(request: Request, db: Session, collector: dict, event_data: dict, *, rotate: bool = False, test_phase: bool = False):
+    """Email d'invito del cassiere con link e codice a 6 cifre (per l'app installata su iPhone). Senza commit."""
+    row = collector_token_row(db, collector["id"], rotate=rotate)
+    link = f"{base_url_for(request)}/#cassiere={row.access_token}"
+    return treasurer_invite_mail(collector, link, event_data, test_phase=test_phase, code=issue_login_code(row))
 
 
 @router.post("/invites")
@@ -132,11 +145,11 @@ def send_invites(body: InvitesIn, request: Request, db: Session = Depends(get_db
             if body.rotate and not body.dryRun:
                 t.access_token = None  # graduate_link ne crea uno nuovo
             candidates.append(("graduate", t.id, t.name, t.email,
-                               lambda t=t: ("graduate_link", graduate_link_mail(t, graduate_link(request, db, t, commit=False), event_data, test_phase=body.testPhase))))
+                               lambda t=t: ("graduate_link", graduate_link_mail(t, graduate_link(request, db, t, commit=False), event_data, test_phase=body.testPhase, code=issue_login_code(t)))))
     if "treasurers" in body.roles:
         for c in gift_collectors_info(event_data):
             candidates.append(("treasurer", c["id"], c.get("name", ""), settings.treasurer_emails.get(c["id"], ""),
-                               lambda c=c: ("treasurer_invite", treasurer_invite_mail(c, collector_link(request, db, c["id"], rotate=body.rotate), event_data, test_phase=body.testPhase))))
+                               lambda c=c: ("treasurer_invite", _treasurer_invite(request, db, c, event_data, rotate=body.rotate, test_phase=body.testPhase))))
 
     rows = []
     for role, rid, name, email, build in candidates:

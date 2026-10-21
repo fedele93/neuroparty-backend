@@ -92,8 +92,7 @@ def _button(url: str, label: str) -> str:
 
 
 
-# Validità del codice di accesso a 6 cifre spedito con il link personale (vedi routers/profile.py).
-LOGIN_CODE_MINUTES = 15
+from .login_code import LOGIN_CODE_MINUTES  # noqa: E402  (il codice a 6 cifre spedito con i link personali)
 
 
 def first_name(full_name: str) -> str:
@@ -108,24 +107,13 @@ def access_link_mail(guest: Guest, link: str, event_data: dict, code: str = "") 
     (lì il link si apre in Safari e non nell'app: il codice si digita dentro l'app)."""
     ev = event_summary(event_data)
     subject = f"Il tuo link personale per {ev['title']}"
-    code_txt = (
-        f"\n\nHai aggiunto l'app alla schermata Home dell'iPhone? Lì il link si apre in Safari e non nell'app: "
-        f"apri l'app, tocca \"Accedi con la tua email\" e inserisci questo codice: {code} (vale {LOGIN_CODE_MINUTES} minuti)."
-        if code else ""
-    )
+    code_txt, code_html = _code_block(code, 'tocca "Accedi con la tua email"')
     text = (
         f"Ciao {first_name(guest.full_name)},\n\n"
         f"ecco il tuo link personale per la festa di specializzazione ({ev['partyDate']}"
         f"{', ' + ev['location'] if ev['location'] else ''}).\n"
         f"Da qui confermi la partecipazione, indichi chi viene con te e il menu, e trovi tutto il resto:\n\n{link}{code_txt}\n\n"
         "Il link è personale: non inoltrarlo. Se non l'hai richiesto tu, ignora questa email.\n\nA presto!"
-    )
-    code_html = (
-        f'<p style="font-size:13px;color:#5B6677;margin-top:18px;">Hai aggiunto l\'app alla schermata Home dell\'iPhone? '
-        f'Lì il link si apre in Safari e non nell\'app: apri l\'app, tocca <b>Accedi con la tua email</b> e inserisci questo codice '
-        f'(vale {LOGIN_CODE_MINUTES} minuti):</p>'
-        f'<p style="font-size:26px;letter-spacing:6px;font-weight:700;color:#0A192F;margin:4px 0 0;">{html_lib.escape(code)}</p>'
-        if code else ""
     )
     body = (
         f"<p>Ciao {html_lib.escape(first_name(guest.full_name))},</p>"
@@ -177,13 +165,32 @@ TREASURER_STEPS = [
 ]
 
 
-def _link_mail(*, title: str, name: str, intro: str, link: str, button: str, steps: list[str], footer: str,
-               test_phase: bool) -> tuple[str, str]:
-    """Scheletro comune delle email con link personale e istruzioni: saluto, introduzione, link,
-    passi numerati, avviso della fase di prova, chiusura. Ritorna (testo, html)."""
-    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(steps, 1))
+def _code_block(code: str, where: str) -> tuple[str, str]:
+    """Paragrafo con il codice a 6 cifre per chi ha l'app installata sull'iPhone (testo, html); vuoto senza codice.
+    `where` dice dove digitarlo nell'app (es. 'tocca "Accedi con la tua email"')."""
+    if not code:
+        return "", ""
     text = (
-        f"Ciao {name},\n\n{intro}\n\n{link}\n\nCome funziona:\n{steps_txt}\n\n"
+        f"\n\nHai aggiunto l'app alla schermata Home dell'iPhone? Lì il link si apre in Safari e non nell'app: "
+        f"apri l'app, {where} e inserisci questo codice: {code} (vale {LOGIN_CODE_MINUTES} minuti)."
+    )
+    html = (
+        f'<p style="font-size:13px;color:#5B6677;margin-top:18px;">Hai aggiunto l\'app alla schermata Home dell\'iPhone? '
+        f'Lì il link si apre in Safari e non nell\'app: apri l\'app, {html_lib.escape(where)} e inserisci questo codice '
+        f'(vale {LOGIN_CODE_MINUTES} minuti):</p>'
+        f'<p style="font-size:26px;letter-spacing:6px;font-weight:700;color:#0A192F;margin:4px 0 0;">{html_lib.escape(code)}</p>'
+    )
+    return text, html
+
+
+def _link_mail(*, title: str, name: str, intro: str, link: str, button: str, steps: list[str], footer: str,
+               test_phase: bool, code: str = "", code_where: str = "") -> tuple[str, str]:
+    """Scheletro comune delle email con link personale e istruzioni: saluto, introduzione, link,
+    codice a 6 cifre (se c'è), passi numerati, avviso della fase di prova, chiusura. Ritorna (testo, html)."""
+    steps_txt = "\n".join(f"{i}. {x}" for i, x in enumerate(steps, 1))
+    code_txt, code_html = _code_block(code, code_where)
+    text = (
+        f"Ciao {name},\n\n{intro}\n\n{link}{code_txt}\n\nCome funziona:\n{steps_txt}\n\n"
         + (TEST_PHASE_TEXT + "\n\n" if test_phase else "")
         + footer
     )
@@ -191,33 +198,37 @@ def _link_mail(*, title: str, name: str, intro: str, link: str, button: str, ste
         f"<p>Ciao {html_lib.escape(name)},</p><p>{html_lib.escape(intro)}</p>"
         + _button(link, button)
         + f'<p style="font-size:13px;color:#5B6677;">Oppure copia questo indirizzo: <a href="{html_lib.escape(link)}">{html_lib.escape(link)}</a></p>'
+        + code_html
         + _steps_html("Come funziona", steps)
         + (f"<p><b>Fase di prova.</b> {html_lib.escape(TEST_PHASE_TEXT)}</p>" if test_phase else "")
     )
     return text, _layout(title, body, footer.split("\n")[0])
 
 
-def graduate_link_mail(target, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
-    """Link personale del festeggiato con le istruzioni per usare la sua area."""
+def graduate_link_mail(target, link: str, event_data: dict, test_phase: bool = False, code: str = "") -> tuple[str, str, str]:
+    """Link personale del festeggiato con le istruzioni per usare la sua area (e il codice a 6 cifre, se c'è)."""
     ev = event_summary(event_data)
     text, html = _link_mail(
         title="La tua area festeggiato", name=first_name(target.short_name),
         intro="ecco il tuo link personale da festeggiato per l'app della festa:", link=link,
         button="Apri la mia area 🎓", steps=GRADUATE_STEPS, test_phase=test_phase,
+        code=code, code_where='vai in ⚙️ Impostazioni → "Sono un festeggiato"',
         footer="Il link è personale: non inoltrarlo. Se lo perdi, in ⚙️ tocca \"Sono un festeggiato\" e scrivi la tua email.\n\nA presto!",
     )
     return f"La tua area festeggiato per {ev['title']}", text, html
 
 
-def treasurer_invite_mail(collector: dict, link: str, event_data: dict, test_phase: bool = False) -> tuple[str, str, str]:
-    """Link con il token del cassiere (#cassiere=<token>) e le istruzioni per il cruscotto delle quote uniche."""
+def treasurer_invite_mail(collector: dict, link: str, event_data: dict, test_phase: bool = False, code: str = "") -> tuple[str, str, str]:
+    """Link con il token del cassiere (#cassiere=<token>) e le istruzioni per il cruscotto delle quote uniche
+    (e il codice a 6 cifre, se c'è)."""
     ev = event_summary(event_data)
     methods = ", ".join(collector.get("paymentMethods") or []) or "IBAN"
     text, html = _link_mail(
         title="Il tuo accesso da cassiere", name=first_name(collector.get("name") or ""),
         intro=f"raccogli le quote uniche per i neo-specialisti (metodi che accetti: {methods}). Ecco il tuo link da cassiere:",
         link=link, button="Apri il cruscotto del cassiere 👛", steps=TREASURER_STEPS, test_phase=test_phase,
-        footer="Il link contiene il tuo token: non inoltrarlo a nessuno. Se lo perdi, chiedilo agli organizzatori.\n\nGrazie!",
+        code=code, code_where='vai in ⚙️ Impostazioni → "Sono un cassiere"',
+        footer="Il link contiene il tuo token: non inoltrarlo a nessuno. Se lo perdi, in ⚙️ tocca \"Sono un cassiere\" e scrivi la tua email.\n\nGrazie!",
     )
     return f"Il tuo accesso da cassiere per {ev['title']}", text, html
 

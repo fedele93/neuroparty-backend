@@ -6,6 +6,8 @@
   serve al cassiere scelto (vedi "giftCollectors" in event-data.json) per sapere quanto girare a ognuno.
   L'elenco completo è riservato al cassiere/organizzatori (X-Treasurer-Token o X-Admin-Token);
   ogni dispositivo vede solo le quote che ha registrato (X-Client-Id).
+- Il cassiere si fa rimandare il proprio link (POST /collector/request-link, email TREASURER_EMAIL_<ID>)
+  e, dall'app installata su iPhone, entra con il codice a 6 cifre dell'email (POST /collector/verify-code).
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -13,15 +15,17 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_client_id, require_treasurer, treasurer_scope
 from ..deps import get_db
+from ..login_code import check_login_code, issue_login_code
 from ..models import (
     POOL_STATUS_PENDING,
     POOL_STATUS_RECEIVED,
     GiftPoolAllocation,
+    GiftCollectorToken,
     GiftPoolContribution,
     GiftTarget,
     now_ms,
 )
-from ..schemas import PoolBatchStatusIn, PoolContributionIn, PoolNoteIn, PoolStatusIn
+from ..schemas import PoolBatchStatusIn, PoolContributionIn, PoolNoteIn, PoolStatusIn, ProfileCodeVerify, ProfileLinkRequest
 from ..seed import gift_collector_info, gift_collectors_info
 from ..state import bump_version
 
@@ -188,6 +192,43 @@ def collector(request: Request):
 def collectors(request: Request):
     """Tutti i cassieri delle quote uniche, con IBAN/PayPal e metodi ammessi."""
     return collectors_of(request)
+
+
+def _collector_by_email(request: Request, email: str) -> dict | None:
+    """Il cassiere con quell'email (TREASURER_EMAIL_<ID> nel .env), o None."""
+    email = (email or "").strip().lower()
+    cid = next((i for i, e in request.app.state.settings.treasurer_emails.items() if e.strip().lower() == email), None)
+    return next((c for c in collectors_of(request) if c["id"] == cid), None) if cid else None
+
+
+@router.post("/collector/request-link", status_code=202)
+def collector_request_link(body: ProfileLinkRequest, request: Request, db: Session = Depends(get_db)):
+    """Manda al cassiere il proprio link (#cassiere=<token>) con il codice a 6 cifre, se l'email è la sua
+    (TREASURER_EMAIL_<ID>). Stessa email degli inviti del cruscotto. La risposta non rivela se l'email è di un cassiere."""
+    from .admin import _treasurer_invite  # import locale: admin importa già questo modulo
+
+    mailer = request.app.state.mailer
+    if not mailer.enabled:
+        return {"queued": False, "message": "Il server non può inviare email in questo momento: chiedi il token agli organizzatori."}
+    collector = _collector_by_email(request, body.email)
+    if collector is not None:
+        subject, text, html = _treasurer_invite(request, db, collector, request.app.state.event_data)
+        db.commit()
+        mailer.send("treasurer_invite", request.app.state.settings.treasurer_emails[collector["id"]], subject, text, html)
+    return {"queued": True, "message": "Se l'email è quella di un cassiere riceverai il link e il codice fra poco: controlla la posta (anche lo spam)."}
+
+
+@router.post("/collector/verify-code")
+def collector_verify_code(body: ProfileCodeVerify, request: Request, db: Session = Depends(get_db)):
+    """Scambia email + codice a 6 cifre (dall'email del link) con il token del cassiere: lo stesso del link
+    #cassiere=. Monouso, pochi tentativi; la risposta non rivela se l'email è di un cassiere."""
+    collector = _collector_by_email(request, body.email)
+    row = db.get(GiftCollectorToken, collector["id"]) if collector else None
+    if not check_login_code(row, body.code):
+        db.commit()
+        raise HTTPException(401, "Codice non valido o scaduto: richiedi un nuovo link con la tua email")
+    db.commit()
+    return {"token": row.access_token}
 
 
 # ---------------------------------------------------------------- quota unica: invitati

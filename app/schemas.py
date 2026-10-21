@@ -55,7 +55,8 @@ class ProfileLinkRequest(BaseModel):
 
 
 class ProfileCodeVerify(BaseModel):
-    """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone)."""
+    """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone):
+    invitati (/api/profile), festeggiati (/api/graduate) e cassieri (/api/gifts/collector)."""
     email: str = Field(min_length=3, max_length=200)
     code: str = Field(min_length=1, max_length=20)
 

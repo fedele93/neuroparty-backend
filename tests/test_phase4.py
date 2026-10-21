@@ -175,6 +175,14 @@ def test_graduate_link_by_email(tmp_path):
         # stesso link a ogni richiesta; email sconosciuta: stessa risposta, nessuna mail
         c.post("/api/graduate/request-link", json={"email": "DALILA@example.org"})
         assert token in _mails(n8n)[-1]["text"] and len(_mails(n8n)) == 2
+        # codice a 6 cifre nell'email (app installata su iPhone): stesso token del link, monouso
+        code = _mails(n8n)[-1]["text"].split("codice: ")[1].split()[0]
+        assert len(code) == 6 and code.isdigit() and "Sono un festeggiato" in _mails(n8n)[-1]["text"]
+        V = "/api/graduate/verify-code"
+        assert c.post(V, json={"email": "chiunque@example.org", "code": code}).status_code == 401
+        assert c.post(V, json={"email": "dalila@example.org", "code": "000000" if code != "000000" else "111111"}).status_code == 401
+        assert c.post(V, json={"email": "dalila@example.org", "code": code}).json()["token"] == token
+        assert c.post(V, json={"email": "dalila@example.org", "code": code}).status_code == 401
         other = c.post("/api/graduate/request-link", json={"email": "chiunque@example.org"})
         assert other.json()["message"] == r.json()["message"] and len(_mails(n8n)) == 2
         assert c.post("/api/graduate/request-link", json={"email": "non-una-mail"}).status_code == 422
@@ -225,6 +233,20 @@ def test_role_invites_dry_run_and_send(tmp_path):
         assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": aki_link}).status_code == 403
         assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": new_link}).status_code == 200
         assert c.get("/api/gifts/pool", headers={"X-Treasurer-Token": "tok-aki"}).status_code == 200  # il .env continua a valere
+        # il cassiere si fa rimandare il link da solo (stesso link) ed entra con il codice a 6 cifre dell'email
+        r = c.post("/api/gifts/collector/request-link", json={"email": "AKI@example.org"})
+        assert r.status_code == 202 and r.json()["queued"] is True
+        last = _mails(n8n)[-1]
+        assert last["kind"] == "treasurer_invite" and new_link in last["text"] and "Sono un cassiere" in last["text"]
+        code = last["text"].split("codice: ")[1].split()[0]
+        V = "/api/gifts/collector/verify-code"
+        assert c.post(V, json={"email": "nessuno@example.org", "code": code}).status_code == 401
+        assert c.post(V, json={"email": "aki@example.org", "code": "999999" if code != "999999" else "888888"}).status_code == 401
+        assert c.post(V, json={"email": "aki@example.org", "code": code}).json()["token"] == new_link
+        assert c.post(V, json={"email": "aki@example.org", "code": code}).status_code == 401  # monouso
+        # email sconosciuta: stessa risposta, nessuna email in più
+        n = len(_mails(n8n))
+        assert c.post("/api/gifts/collector/request-link", json={"email": "nessuno@example.org"}).json()["message"] == r.json()["message"] and len(_mails(n8n)) == n
 
 
 def test_reset_test_data_keeps_configuration(tmp_path):
