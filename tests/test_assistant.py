@@ -67,7 +67,7 @@ def test_tools_read_and_write_through_the_app(bot):
     # lettura: posti navetta (strumento get_bus_availability)
     r = bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "Quanti posti ci sono sulla navetta?"}).json()
     assert r["actions"][0]["tool"] == "get_bus_availability" and r["actions"][0]["ok"]
-    assert "44 posti liberi" in r["reply"]  # 54 - 10 demo
+    assert "20 posti liberi" in r["reply"]  # 30 - 10 demo
     # scrittura: prenotazione (il simulatore chiama book_bus dopo la "conferma")
     before = bot.get("/api/bus/summary").json()["bookedSeats"]
     r = bot.post("/api/assistant/talk", data={"avatarId": "luisi", "text": "Conferma prenotazione navetta per Nonna Lina"},

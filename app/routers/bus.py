@@ -29,7 +29,7 @@ def max_seats(request: Request) -> int:
     settings = request.app.state.settings
     if settings.max_bus_seats_override:
         return settings.max_bus_seats_override
-    return int(request.app.state.event_data.get("meta", {}).get("maxBusSeats", 54))
+    return int(request.app.state.event_data.get("meta", {}).get("maxBusSeats", 30))
 
 
 def booked_seats(db: Session) -> int:
