@@ -49,6 +49,8 @@ ADDED_COLUMNS = {
         "email": "VARCHAR(200) NOT NULL DEFAULT ''", "phone": "VARCHAR(100) NOT NULL DEFAULT ''",
         "menu": "VARCHAR(30) NOT NULL DEFAULT ''", "companions_json": "TEXT NOT NULL DEFAULT '[]'",
         "access_token": "VARCHAR(64)", "token_created_at": "INTEGER", "consent_at": "INTEGER", "last_login_at": "INTEGER",
+        "login_code_hash": "VARCHAR(64) NOT NULL DEFAULT ''", "login_code_expires_at": "INTEGER",
+        "login_code_attempts": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 

@@ -36,6 +36,13 @@ class CompanionIn(BaseModel):
     notes: str = Field(default="", max_length=300)
 
 
+def _email_ok(v: str) -> str:
+    v = _clean(v).lower()
+    if "@" not in v or "." not in v.split("@")[-1] or " " in v:
+        raise ValueError("Indirizzo email non valido")
+    return v
+
+
 class ProfileLinkRequest(BaseModel):
     """Richiesta del link personale: con l'email di un invitato già in lista, oppure email + nome per crearsi."""
     email: str = Field(min_length=3, max_length=200)
@@ -44,10 +51,23 @@ class ProfileLinkRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def email_ok(cls, v: str) -> str:
-        v = _clean(v).lower()
-        if "@" not in v or "." not in v.split("@")[-1] or " " in v:
-            raise ValueError("Indirizzo email non valido")
-        return v
+        return _email_ok(v)
+
+
+class ProfileCodeVerify(BaseModel):
+    """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone)."""
+    email: str = Field(min_length=3, max_length=200)
+    code: str = Field(min_length=1, max_length=20)
+
+    @field_validator("email")
+    @classmethod
+    def email_ok(cls, v: str) -> str:
+        return _email_ok(v)
+
+    @field_validator("code")
+    @classmethod
+    def code_ok(cls, v: str) -> str:
+        return "".join(ch for ch in v if ch.isdigit())
 
 
 class ProfileIn(BaseModel):
