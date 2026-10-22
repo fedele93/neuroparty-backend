@@ -69,12 +69,13 @@ def export_bus(db: Session = Depends(get_db)):
     confirmed = [b for b in rows if b.status != "WAITLIST"]
     data = [[b.passenger_name, b.seats_count, "Lista d'attesa" if b.status == "WAITLIST" else "Confermata", b.code, b.pickup_stop,
              "Sì" if b.return_trip_wanted else "No", b.contact_phone or (guests[b.guest_id].phone if b.guest_id in guests else ""),
-             guests[b.guest_id].email if b.guest_id in guests else "", "Sì" if b.checked_in_at else "", b.notes, _fmt_ts(b.booked_at)] for b in rows]
-    data.append(["TOTALE POSTI CONFERMATI", sum(b.seats_count for b in confirmed), "", "", "", "", "", "", "", "", ""])
-    data.append(["IN LISTA D'ATTESA", sum(b.seats_count for b in rows if b.status == "WAITLIST"), "", "", "", "", "", "", "", "", ""])
+             guests[b.guest_id].email if b.guest_id in guests else "", "Sì" if b.guest_id in guests else "No",
+             "Sì" if b.checked_in_at else "", b.notes, _fmt_ts(b.booked_at)] for b in rows]
+    data.append(["TOTALE POSTI CONFERMATI", sum(b.seats_count for b in confirmed), "", "", "", "", "", "", "", "", "", ""])
+    data.append(["IN LISTA D'ATTESA", sum(b.seats_count for b in rows if b.status == "WAITLIST"), "", "", "", "", "", "", "", "", "", ""])
     return _csv_response(
         "navetta.csv",
-        ["Passeggero", "Posti", "Stato", "Codice", "Fermata", "Ritorno", "Telefono", "Email", "Salito", "Note", "Prenotato il"],
+        ["Passeggero", "Posti", "Stato", "Codice", "Fermata", "Ritorno", "Telefono", "Email", "Invitato", "Salito", "Note", "Prenotato il"],
         data,
     )
 

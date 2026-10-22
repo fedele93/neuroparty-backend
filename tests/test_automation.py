@@ -51,7 +51,7 @@ def test_webhook_events_and_signature(tmp_path):
         c.put(f"/api/guests/{g['id']}", json={"rsvpStatus": "DECLINED"}, headers={"X-Client-Id": "b"})
         c.delete(f"/api/guests/{g['id']}", headers={"X-Client-Id": "a"})
         # navetta, augurio, quota regalo, notifica immediata
-        b = c.post("/api/bus/bookings", json={"passengerName": "Anna", "seatsCount": 3}, headers={"X-Client-Id": "a"}).json()
+        b = c.post("/api/bus/bookings", json={"passengerName": "Anna", "seatsCount": 3}, headers={**ADMIN, "X-Client-Id": "a"}).json()
         c.delete(f"/api/bus/bookings/{b['id']}", headers={"X-Client-Id": "a"})
         c.post("/api/wishes", json={"authorName": "Zia", "message": "Bravi!"}, headers=ADMIN)
         c.post("/api/gifts/pool", json={"donorName": "Nonna", "totalAmount": 90, "paymentMethod": "IBAN"})
@@ -105,7 +105,7 @@ def test_webhook_event_filter(tmp_path):
     with make_client(tmp_path, webhook_url=N8N_URL, webhook_events="guest.*, bus.booked", webhook_handler=n8n) as c:
         c.post("/api/wishes", json={"message": "ignorato"}, headers=ADMIN)
         c.post("/api/guests", json={"fullName": "Lia"})
-        c.post("/api/bus/bookings", json={"passengerName": "Ugo"})
+        c.post("/api/bus/bookings", json={"passengerName": "Ugo"}, headers=ADMIN)
         assert n8n.events == ["guest.created", "bus.booked"]
         assert c.app.state.webhooks.stats["skipped"] == 1
         # "test" non rientra nel filtro: l'endpoint di prova lo dice chiaramente

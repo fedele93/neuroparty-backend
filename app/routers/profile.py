@@ -5,6 +5,7 @@
 - PUT  /api/profile                 X-Guest-Token       -> aggiorna RSVP, contatti, accompagnatori e menu; email di conferma
 - POST /api/profile/logout          X-Guest-Token       -> rigenera il token (i link vecchi smettono di valere)
 - POST /api/profile/verify-code     {email, code}       -> il token, dato il codice a 6 cifre spedito con il link
+- POST /api/profile/bus/claim       {bookingId}         -> fa propria una prenotazione navetta fatta a mano a proprio nome
 
 Il codice serve a chi ha aggiunto l'app alla schermata Home dell'iPhone: lì il link dell'email si apre
 in Safari, che non condivide la memoria con l'app installata, quindi il token non arriverebbe mai
@@ -25,11 +26,12 @@ from sqlalchemy.orm import Session
 from ..deadlines import deadline_passed, deadlines_info
 from ..deps import base_url_for, get_db
 from ..login_code import check_login_code, clear_login_code, issue_login_code
+from ..names import same_person
 from ..mail import access_link_mail, bus_mail, rsvp_confirmation_mail
 from ..models import BusBooking, Guest, now_ms
 from ..routers import bus as bus_router
 from ..routers.guests import guests_summary
-from ..schemas import BookingIn, ProfileBusIn, ProfileCodeVerify, ProfileIn, ProfileLinkRequest
+from ..schemas import BookingIn, ProfileBusClaimIn, ProfileBusIn, ProfileCodeVerify, ProfileIn, ProfileLinkRequest
 from ..state import bump_version
 
 router = APIRouter(prefix="/api/profile", tags=["profilo"])
@@ -87,11 +89,22 @@ def own_booking(db: Session, guest: Guest) -> BusBooking | None:
     return db.scalars(select(BusBooking).where(BusBooking.guest_id == guest.id).order_by(BusBooking.id.asc())).first()
 
 
+def unclaimed_booking(db: Session, guest: Guest) -> BusBooking | None:
+    """Una prenotazione navetta senza profilo con lo stesso nome dell'invitato (fatta a mano prima del profilo):
+    il profilo la propone con "È la mia" invece di farne una seconda."""
+    for b in db.scalars(select(BusBooking).where(BusBooking.guest_id.is_(None)).order_by(BusBooking.id.asc())).all():
+        if same_person(b.passenger_name, guest.full_name):
+            return b
+    return None
+
+
 def _profile_payload(guest: Guest, db: Session, request: Request) -> dict:
     booking = own_booking(db, guest)
+    unclaimed = unclaimed_booking(db, guest) if booking is None else None
     return {
         "guest": guest.to_dict(private=True),
         "busBooking": booking.to_dict() if booking else None,
+        "unclaimedBooking": unclaimed.to_dict() if unclaimed else None,
         "bus": bus_router.bus_summary(request, db),
         "deadlines": deadlines_info(request.app.state.event_data),
         "summary": {"covers": guests_summary(db.scalars(select(Guest)).all())["covers"]},
@@ -229,6 +242,17 @@ def set_bus(body: ProfileBusIn, request: Request, guest: Guest = Depends(current
         booking = bus_router.create_booking_record(request, db, req, None, guest=guest)
     kind = "bus_waitlist" if booking.status == bus_router.WAITLIST else "bus_confirmation"
     mail = _send_bus_mail(request, guest, booking, kind)
+    return {**_profile_payload(guest, db, request), "mail": mail}
+
+
+@router.post("/bus/claim")
+def claim_bus(body: ProfileBusClaimIn, request: Request, guest: Guest = Depends(current_guest), db: Session = Depends(get_db)):
+    """"È la mia": lega al profilo una prenotazione senza profilo fatta a proprio nome (vedi unclaimed_booking).
+    Arriva l'email di conferma con il codice."""
+    booking = db.get(BusBooking, body.bookingId)
+    if booking is None or booking.guest_id or not same_person(booking.passenger_name, guest.full_name):
+        raise HTTPException(404, "Nessuna prenotazione a tuo nome da collegare")
+    mail = bus_router.link_booking_to_guest(request, db, booking, guest)
     return {**_profile_payload(guest, db, request), "mail": mail}
 
 

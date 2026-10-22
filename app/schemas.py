@@ -54,6 +54,11 @@ class ProfileLinkRequest(BaseModel):
         return _email_ok(v)
 
 
+class ProfileBusClaimIn(BaseModel):
+    """Prenotazione navetta senza profilo da fare propria ("È la mia")."""
+    bookingId: int
+
+
 class ProfileCodeVerify(BaseModel):
     """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone):
     invitati (/api/profile), festeggiati (/api/graduate) e cassieri (/api/gifts/collector)."""
