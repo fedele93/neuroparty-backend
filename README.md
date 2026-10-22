@@ -16,7 +16,7 @@ arrivano davvero a tutti.
 | Calendario (seduta + festa) da aggiungere al telefono | `GET /api/event/calendar.ics` |
 | Invitati & RSVP | `GET/POST /api/guests`, `PUT/DELETE /api/guests/{id}` |
 | Riepilogo per il catering (coperti, categorie, menu speciali) | `GET /api/guests/summary` |
-| Navetta (con controllo dei 54 posti) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}` |
+| Navetta (30 posti; si prenota dal profilo, `POST /api/bus/bookings` è l'inserimento a mano degli organizzatori; riconciliazione delle prenotazioni senza invitato) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}`, `GET /api/admin/bus/orphans`, `POST /api/admin/bus/{id}/link`, `POST /api/admin/bus/{id}/create-guest`, `POST /api/profile/bus/claim` |
 | Bacheca auguri (solo registrati e ruoli) | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart`, `DELETE /api/wishes/{id}` (organizzatori) |
 | Galleria foto (upload, ridimensionamento a 1600 px; solo registrati e ruoli) | `GET/POST /api/photos`, `POST /api/photos/{id}/like`, `DELETE /api/photos/{id}` (organizzatori) |
 | Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |

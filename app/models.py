@@ -31,8 +31,7 @@ class Guest(Base):
     token_created_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     consent_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_login_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # codice a 6 cifre spedito insieme al link: serve a chi ha l'app installata sull'iPhone, dove il link
-    # dell'email si apre in Safari e non nell'app (memorie separate). Solo l'hash, con scadenza e tentativi.
+    # codice a 6 cifre spedito insieme al link (vedi app/login_code.py): solo l'hash, con scadenza e tentativi
     login_code_hash: Mapped[str] = mapped_column(String(64), default="")
     login_code_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     login_code_attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -214,6 +213,10 @@ class GiftTarget(Base):
     email: Mapped[str] = mapped_column(String(200), default="")  # privata: avvisi al festeggiato (auguri ricevuti)
     # link personale del festeggiato (https://<app>/#festeggiato=<token>), mandato alla sua email: vale come GRADUATE_TOKEN_<ID>
     access_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # codice a 6 cifre spedito insieme al link (vedi app/login_code.py)
+    login_code_hash: Mapped[str] = mapped_column(String(64), default="")
+    login_code_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    login_code_attempts: Mapped[int] = mapped_column(Integer, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     @property
@@ -406,6 +409,10 @@ class GiftCollectorToken(Base):
     collector_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     access_token: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    # codice a 6 cifre spedito insieme al link (vedi app/login_code.py)
+    login_code_hash: Mapped[str] = mapped_column(String(64), default="")
+    login_code_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    login_code_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Meta(Base):

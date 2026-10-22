@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .auth import graduate_for_token, lists_allowed
+from .auth import is_admin as auth_is_admin
 from .mistral import MistralClient, MistralError
 from .models import AssistantAvatar, GiftTarget, Guest, Wish
 from .routers import bus as bus_router
@@ -80,13 +81,13 @@ TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "book_bus",
-            "description": "Prenota posti sulla navetta per la festa. Chiamala SOLO dopo la conferma esplicita dell'utente su nome, "
-                           "numero di posti e fermata.",
+            "description": "Prenota posti sulla navetta a nome di un'altra persona: SOLO per gli organizzatori (gli invitati prenotano dal "
+                           "profilo con book_my_bus). Chiamala SOLO dopo la conferma esplicita dell'utente su nome, numero di posti e fermata.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "passengerName": {"type": "string"},
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 54},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 30},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                     "contactPhone": {"type": "string"},
@@ -217,7 +218,7 @@ PROFILE_TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 54, "description": "Se omesso: le persone del profilo"},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Se omesso: le persone del profilo"},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                 },
@@ -256,11 +257,13 @@ class Caller:
     guest: Guest | None = None
     graduate_id: str | None = None
     can_see_memories: bool = False
+    is_admin: bool = False
 
     @classmethod
     def resolve(cls, request: Request, db: Session, guest: Guest | None) -> "Caller":
         can_see = guest is not None or lists_allowed(request, db)
-        return cls(guest=guest, graduate_id=graduate_for_token(request, request.headers.get("x-graduate-token"), db), can_see_memories=can_see)
+        return cls(guest=guest, graduate_id=graduate_for_token(request, request.headers.get("x-graduate-token"), db), can_see_memories=can_see,
+                   is_admin=auth_is_admin(request, request.headers.get("x-admin-token")))
 
 
 def tools_for(guest: Guest | None, graduate_id: str | None = None, can_see_memories: bool = True) -> list[dict]:
@@ -471,12 +474,17 @@ def execute_tool(name: str, args: dict, request: Request, db: Session, client_id
             out = guests_router.create_guest(body, request, db, client_id)
             return {"summary": f"{out['fullName']} inserito: {RSVP_LABELS.get(status, status)}, {out['guestsCount']} persone.", "guest": out, "created": True}
         if name == "book_bus":
+            # la navetta si prenota dal profilo (book_my_bus): un nome libero non entra fra gli invitati
+            if not caller.is_admin:
+                return {"error": "La navetta si prenota dal proprio profilo, così chi sale è anche fra gli invitati: se l'utente ha il profilo usa book_my_bus, "
+                                 "altrimenti proponi di aprire il link personale (posso mandarlo io con l'email: send_profile_link). Solo gli organizzatori prenotano per altri.",
+                        "navigate": "rsvp"}
             body = BookingIn(
                 passengerName=(args.get("passengerName") or "").strip(), seatsCount=int(args.get("seatsCount") or 1),
                 pickupStop=args.get("pickupStop") or "", returnTripWanted=bool(args.get("returnTripWanted", True)),
                 contactPhone=args.get("contactPhone") or "",
             )
-            out = bus_router.create_booking(body, request, db, client_id)
+            out = bus_router.create_booking(body, request, db, client_id, admin=True)
             summary = bus_router.bus_summary(request, db)
             return {"summary": f"Prenotati {out['seatsCount']} posti per {out['passengerName']}"
                     + (f" da {out['pickupStop']}" if out["pickupStop"] else "") + f". Restano {summary['availableSeats']} posti.",

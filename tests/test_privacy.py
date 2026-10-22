@@ -18,7 +18,7 @@ def test_lists_are_reserved_to_roles_and_own_records_only(tmp_path):
         assert c.get("/api/state").json()["canSeeLists"] is False
         # un dispositivo vede i record che ha creato (invitato e prenotazione)
         g = c.post("/api/guests", json={"fullName": "Solo Io", "guestsCount": 2}, headers=DEV).json()
-        b = c.post("/api/bus/bookings", json={"passengerName": "Solo Io", "seatsCount": 2}, headers=DEV).json()
+        b = c.post("/api/bus/bookings", json={"passengerName": "Solo Io", "seatsCount": 2}, headers={**ADMIN, **DEV}).json()  # a mano: solo organizzatori
         assert [x["id"] for x in c.get("/api/guests", headers=DEV).json()] == [g["id"]]
         assert [x["id"] for x in c.get("/api/bus/bookings", headers=DEV).json()] == [b["id"]]
         snap = c.get("/api/snapshot", headers=DEV).json()

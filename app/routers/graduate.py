@@ -9,11 +9,12 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_graduate
 from ..deps import base_url_for, get_db
+from ..login_code import check_login_code, issue_login_code
 from ..mail import graduate_link_mail
 from ..models import AssistantAvatar, BusBooking, GiftTarget, Guest, Wish
 from ..routers.bus import bus_summary
 from ..routers.guests import guests_summary
-from ..schemas import ProfileLinkRequest
+from ..schemas import ProfileCodeVerify, ProfileLinkRequest
 
 router = APIRouter(prefix="/api/graduate", tags=["festeggiato"])
 
@@ -35,12 +36,31 @@ def request_link(body: ProfileLinkRequest, request: Request, db: Session = Depen
     mailer = request.app.state.mailer
     if not mailer.enabled:
         return {"queued": False, "message": "Il server non può inviare email in questo momento: chiedi il token agli organizzatori."}
-    target = db.scalars(select(GiftTarget).where(func.lower(GiftTarget.email) == body.email)).first()
+    target = _by_email(db, body.email)
     if target is not None:
-        link = graduate_link(request, db, target)
-        subject, text, html = graduate_link_mail(target, link, request.app.state.event_data)  # stesse istruzioni dell'invito
+        link = graduate_link(request, db, target, commit=False)
+        code = issue_login_code(target)  # per l'app installata su iPhone (vedi app/login_code.py)
+        db.commit()
+        subject, text, html = graduate_link_mail(target, link, request.app.state.event_data, code=code)  # stesse istruzioni dell'invito
         mailer.send("graduate_link", target.email, subject, text, html)
-    return {"queued": True, "message": "Se l'email è quella di un festeggiato riceverai il link fra poco: controlla la posta (anche lo spam)."}
+    return {"queued": True, "message": "Se l'email è quella di un festeggiato riceverai il link e il codice fra poco: controlla la posta (anche lo spam)."}
+
+
+def _by_email(db: Session, email: str) -> GiftTarget | None:
+    return db.scalars(select(GiftTarget).where(func.lower(GiftTarget.email) == (email or "").strip().lower())).first()
+
+
+@router.post("/verify-code")
+def verify_code(body: ProfileCodeVerify, request: Request, db: Session = Depends(get_db)):
+    """Scambia email + codice a 6 cifre (dall'email del link) con il token del festeggiato: lo stesso del
+    link #festeggiato=. Monouso, pochi tentativi; la risposta non rivela se l'email è di un festeggiato."""
+    target = _by_email(db, body.email)
+    if not check_login_code(target, body.code):
+        db.commit()
+        raise HTTPException(401, "Codice non valido o scaduto: richiedi un nuovo link con la tua email")
+    link = graduate_link(request, db, target, commit=False)  # crea il token se manca
+    db.commit()
+    return {"token": link.split("#festeggiato=")[1]}
 
 
 @router.get("/me")

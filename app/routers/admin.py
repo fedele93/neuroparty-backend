@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session
 from ..auth import require_admin
 from ..deadlines import deadlines_info
 from ..deps import base_url_for, get_db
+from ..login_code import issue_login_code
 from ..mail import graduate_link_mail, treasurer_invite_mail
+from ..names import name_similarity
 from ..models import (
     AssistantAvatar, BusBooking, EventNotification, GiftCollectorToken, GiftPoolAllocation, GiftPoolContribution,
     GiftTarget, Guest, MailOutbox, Meta, SharedPhoto, Wish, now_ms,
 )
 from ..push import subscription_count
-from ..routers.bus import bus_summary
+from ..routers.bus import bus_summary, link_booking_to_guest
 from ..routers.gifts import pool_summary
 from ..routers.graduate import graduate_link
 from ..routers.guests import guests_summary
@@ -55,6 +57,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         todo.append({"key": "no_profile", "text": f"{len(no_profile)} confermati senza email né profilo: raccogli le email o importa la lista", "action": "import"})
     if bus["waitlistBookings"]:
         todo.append({"key": "waitlist", "text": f"{bus['waitlistBookings']} prenotazioni in lista d'attesa per la navetta", "section": "bus"})
+    orphans = [b for b in bookings if not b.guest_id]
+    if orphans:
+        todo.append({"key": "bus_orphans", "text": f"{len(orphans)} prenotazioni navetta senza invitato: collegale o crea l'invitato", "action": "bus_orphans"})
     if mail_counts.get("FAILED"):
         todo.append({"key": "mail_failed", "text": f"{mail_counts['FAILED']} email non consegnate: rimandale dal pannello Email", "action": "mail"})
     if not mailer.enabled:
@@ -74,7 +79,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "byMenu": summary["byMenu"], "allergies": len(summary["allergies"]),
             "updatedLastWeek": sum(1 for g in guests if (g.updated_at or 0) >= week_ago),
         },
-        "bus": {**bus, "bookings": len(bookings), "withEmail": sum(1 for b in bookings if b.guest_id)},
+        "bus": {**bus, "bookings": len(bookings), "withEmail": sum(1 for b in bookings if b.guest_id), "withoutGuest": len(orphans)},
         "mail": {"enabled": mailer.enabled, "counts": mail_counts, "failed": [m.to_dict() for m in failed_mails]},
         # quote uniche: solo conteggi, mai cifre (le vedono soltanto i cassieri con il loro token)
         "pool": {"contributions": pool["contributions"], "pending": pool["pending"], "received": pool["received"],
@@ -86,6 +91,61 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "deadlines": deadlines,
         "todo": todo,
     }
+
+
+# ------------------------------------------------------------------ navetta: prenotazioni senza invitato
+# Nate dal vecchio pulsante "Aderisci all'autobus" (oggi riservato agli organizzatori) o inserite a mano:
+# nomi liberi, non in lista invitati. Da qui si collegano a un invitato (con conferma di chi guarda) o se ne
+# crea uno nuovo, così pullman e catering tornano a contare le stesse persone.
+
+
+class LinkBookingIn(BaseModel):
+    guestId: int
+
+
+@router.get("/bus/orphans")
+def bus_orphans(db: Session = Depends(get_db)):
+    """Prenotazioni navetta senza invitato, ciascuna con gli invitati dal nome simile (2 = stesso nome, 1 = una
+    parola in comune), i più simili prima. Chi guarda sceglie: nessun collegamento automatico."""
+    guests = db.scalars(select(Guest).order_by(Guest.full_name.asc())).all()
+    out = []
+    for b in db.scalars(select(BusBooking).where(BusBooking.guest_id.is_(None)).order_by(BusBooking.booked_at.asc())).all():
+        scored = sorted(((name_similarity(b.passenger_name, g.full_name), g) for g in guests), key=lambda x: -x[0])
+        out.append({
+            **b.to_dict(),
+            "suggestions": [{"id": g.id, "fullName": g.full_name, "category": g.category, "rsvpStatus": g.rsvp_status,
+                             "guestsCount": g.guests_count, "hasEmail": bool(g.email), "hasBooking": any(x.guest_id == g.id for x in db.scalars(select(BusBooking).where(BusBooking.guest_id == g.id)).all()),
+                             "score": score} for score, g in scored if score > 0][:5],
+        })
+    return out
+
+
+@router.post("/bus/{booking_id}/link")
+def bus_link(booking_id: int, body: LinkBookingIn, request: Request, db: Session = Depends(get_db)):
+    """Lega la prenotazione a un invitato esistente; se ha l'email riceve la conferma con il codice."""
+    booking = db.get(BusBooking, booking_id)
+    guest = db.get(Guest, body.guestId)
+    if booking is None or guest is None:
+        raise HTTPException(404, "Prenotazione o invitato non trovati")
+    mail = link_booking_to_guest(request, db, booking, guest)
+    return {"booking": booking.to_dict(), "guest": guest.to_dict(private=True), "mail": mail}
+
+
+@router.post("/bus/{booking_id}/create-guest", status_code=201)
+def bus_create_guest(booking_id: int, request: Request, db: Session = Depends(get_db)):
+    """Crea l'invitato dalla prenotazione (nome, telefono, tanti posti quante persone) in attesa di conferma, e la lega."""
+    booking = db.get(BusBooking, booking_id)
+    if booking is None:
+        raise HTTPException(404, "Prenotazione non trovata")
+    if booking.guest_id:
+        raise HTTPException(409, "Questa prenotazione è già legata a un invitato")
+    guest = Guest(full_name=booking.passenger_name, category="Invitato", rsvp_status="PENDING", guests_count=max(1, booking.seats_count),
+                  phone=booking.contact_phone or "", contact_info=booking.contact_phone or "", dietary_notes="", owner_client_id=booking.owner_client_id)
+    db.add(guest)
+    db.flush()
+    mail = link_booking_to_guest(request, db, booking, guest)  # senza email: nessuna mail
+    request.app.state.webhooks.emit("guest.created", {"guest": guest.to_dict(private=True), "fromBooking": booking.to_dict()})
+    return {"booking": booking.to_dict(), "guest": guest.to_dict(private=True), "mail": mail}
 
 
 # ------------------------------------------------------------------ inviti a festeggiati e cassieri
@@ -103,9 +163,9 @@ class InvitesIn(BaseModel):
     rotate: bool = False
 
 
-def collector_link(request: Request, db: Session, collector_id: str, rotate: bool = False) -> str:
-    """Il link personale del cassiere (#cassiere=<token>): generato nel database la prima volta, poi sempre lo
-    stesso; con rotate ne crea uno nuovo. Vale come TREASURER_TOKEN_<ID>. Senza commit: lo fa chi chiama."""
+def collector_token_row(db: Session, collector_id: str, rotate: bool = False) -> GiftCollectorToken:
+    """L'accesso del cassiere nel database: creato la prima volta, poi sempre lo stesso; con rotate il token
+    cambia (il vecchio link smette di valere). Senza commit: lo fa chi chiama."""
     row = db.get(GiftCollectorToken, collector_id)
     if row is None:
         row = GiftCollectorToken(collector_id=collector_id, access_token=secrets.token_urlsafe(24))
@@ -113,7 +173,19 @@ def collector_link(request: Request, db: Session, collector_id: str, rotate: boo
     elif rotate:
         row.access_token = secrets.token_urlsafe(24)
         row.created_at = now_ms()
-    return f"{base_url_for(request)}/#cassiere={row.access_token}"
+    return row
+
+
+def collector_link(request: Request, db: Session, collector_id: str, rotate: bool = False) -> str:
+    """Il link personale del cassiere (#cassiere=<token>). Vale come TREASURER_TOKEN_<ID>. Senza commit."""
+    return f"{base_url_for(request)}/#cassiere={collector_token_row(db, collector_id, rotate).access_token}"
+
+
+def _treasurer_invite(request: Request, db: Session, collector: dict, event_data: dict, *, rotate: bool = False, test_phase: bool = False):
+    """Email d'invito del cassiere con link e codice a 6 cifre (per l'app installata su iPhone). Senza commit."""
+    row = collector_token_row(db, collector["id"], rotate=rotate)
+    link = f"{base_url_for(request)}/#cassiere={row.access_token}"
+    return treasurer_invite_mail(collector, link, event_data, test_phase=test_phase, code=issue_login_code(row))
 
 
 @router.post("/invites")
@@ -132,11 +204,11 @@ def send_invites(body: InvitesIn, request: Request, db: Session = Depends(get_db
             if body.rotate and not body.dryRun:
                 t.access_token = None  # graduate_link ne crea uno nuovo
             candidates.append(("graduate", t.id, t.name, t.email,
-                               lambda t=t: ("graduate_link", graduate_link_mail(t, graduate_link(request, db, t, commit=False), event_data, test_phase=body.testPhase))))
+                               lambda t=t: ("graduate_link", graduate_link_mail(t, graduate_link(request, db, t, commit=False), event_data, test_phase=body.testPhase, code=issue_login_code(t)))))
     if "treasurers" in body.roles:
         for c in gift_collectors_info(event_data):
             candidates.append(("treasurer", c["id"], c.get("name", ""), settings.treasurer_emails.get(c["id"], ""),
-                               lambda c=c: ("treasurer_invite", treasurer_invite_mail(c, collector_link(request, db, c["id"], rotate=body.rotate), event_data, test_phase=body.testPhase))))
+                               lambda c=c: ("treasurer_invite", _treasurer_invite(request, db, c, event_data, rotate=body.rotate, test_phase=body.testPhase))))
 
     rows = []
     for role, rid, name, email, build in candidates:

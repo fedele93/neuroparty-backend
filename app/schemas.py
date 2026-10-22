@@ -54,8 +54,14 @@ class ProfileLinkRequest(BaseModel):
         return _email_ok(v)
 
 
+class ProfileBusClaimIn(BaseModel):
+    """Prenotazione navetta senza profilo da fare propria ("È la mia")."""
+    bookingId: int
+
+
 class ProfileCodeVerify(BaseModel):
-    """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone)."""
+    """Accesso con il codice a 6 cifre ricevuto nell'email del link (app installata su iPhone):
+    invitati (/api/profile), festeggiati (/api/graduate) e cassieri (/api/gifts/collector)."""
     email: str = Field(min_length=3, max_length=200)
     code: str = Field(min_length=1, max_length=20)
 
@@ -97,7 +103,7 @@ class ProfileIn(BaseModel):
 
 class ProfileBusIn(BaseModel):
     """Navetta dal profilo: posti (default = persone del profilo), fermata, ritorno, telefono."""
-    seatsCount: int | None = Field(default=None, ge=1, le=54)
+    seatsCount: int | None = Field(default=None, ge=1, le=30)
     pickupStop: str = Field(default="", max_length=200)
     returnTripWanted: bool = True
     contactPhone: str = Field(default="", max_length=100)
@@ -137,7 +143,7 @@ class GuestUpdate(BaseModel):
 
 class BookingIn(BaseModel):
     passengerName: str = Field(min_length=1, max_length=200)
-    seatsCount: int = Field(default=1, ge=1, le=54)
+    seatsCount: int = Field(default=1, ge=1, le=30)
     pickupStop: str = Field(default="", max_length=200)
     returnTripWanted: bool = True
     contactPhone: str = Field(default="", max_length=100)

@@ -29,7 +29,7 @@ def max_seats(request: Request) -> int:
     settings = request.app.state.settings
     if settings.max_bus_seats_override:
         return settings.max_bus_seats_override
-    return int(request.app.state.event_data.get("meta", {}).get("maxBusSeats", 54))
+    return int(request.app.state.event_data.get("meta", {}).get("maxBusSeats", 30))
 
 
 def booked_seats(db: Session) -> int:
@@ -124,14 +124,41 @@ def list_bookings(
     return [b.to_dict() for b in rows]
 
 
+NO_ANON_BOOKING = ("La navetta si prenota dal proprio profilo (scheda Invitati → \"Accedi con la tua email\"): così sappiamo chi sei, "
+                   "ti arriva la conferma e il catering ti conta. Gli organizzatori possono inserire una prenotazione a mano.")
+
+
 @router.post("/bookings", status_code=201)
 def create_booking(
     body: BookingIn,
     request: Request,
     db: Session = Depends(get_db),
     client_id: str | None = Depends(get_client_id),
+    admin: bool = Depends(is_admin),
 ):
+    """Inserimento a mano da parte degli organizzatori (es. chi telefona). Gli invitati prenotano dal profilo
+    (PUT /api/profile/bus), così ogni passeggero è anche un invitato: niente più nomi "fantasma" sul pullman."""
+    if not admin:
+        raise HTTPException(403, NO_ANON_BOOKING)
     return create_booking_record(request, db, body, client_id).to_dict()
+
+
+def link_booking_to_guest(request: Request, db: Session, booking: BusBooking, guest: Guest) -> dict | None:
+    """Lega una prenotazione senza profilo a un invitato (una sola prenotazione per invitato) e, se ha l'email,
+    gli manda la conferma con il codice. Ritorna la riga dell'outbox o None. Senza commit."""
+    from .profile import _send_bus_mail, own_booking
+
+    if booking.guest_id:
+        raise HTTPException(409, "Questa prenotazione è già legata a un invitato")
+    if own_booking(db, guest) is not None:
+        raise HTTPException(409, f"{guest.full_name} ha già una prenotazione dal profilo")
+    booking.guest_id = guest.id
+    if not booking.contact_phone and guest.phone:
+        booking.contact_phone = guest.phone
+    bump_version(db)
+    db.commit()
+    db.refresh(booking)
+    return _send_bus_mail(request, guest, booking, "bus_waitlist" if booking.status == WAITLIST else "bus_confirmation")
 
 
 @router.delete("/bookings/{booking_id}", status_code=204)

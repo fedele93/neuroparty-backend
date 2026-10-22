@@ -110,7 +110,7 @@ def test_import_guests_and_dashboard(tmp_path):
         dash = c.get("/api/admin/dashboard", headers=ADMIN).json()
         g = dash["guests"]
         assert g["total"] == len(before) + 2 and g["withEmail"] >= 2 and g["withProfile"] >= 2 and g["pending"] >= 2
-        assert dash["bus"]["maxSeats"] == 54 and "waitlistBookings" in dash["bus"]
+        assert dash["bus"]["maxSeats"] == 30 and "waitlistBookings" in dash["bus"]
         assert dash["mail"]["enabled"] is True and dash["mail"]["counts"].get("DELIVERED") == 2 and dash["mail"]["failed"] == []
         assert dash["pool"]["contributions"] >= 1 and [x["id"] for x in dash["pool"]["collectors"]] == ["roberto", "aki"]
         assert dash["assistant"] == {"configured": True, "avatars": 9, "ready": 1}

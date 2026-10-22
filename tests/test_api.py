@@ -11,7 +11,7 @@ def test_health_and_event(client):
     assert client.get("/api/health").json() == {"status": "ok"}
     ev = client.get("/api/event").json()
     assert len(ev["graduates"]) == 9
-    assert ev["meta"]["maxBusSeats"] == 54
+    assert ev["meta"]["maxBusSeats"] == 30
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
@@ -83,22 +83,25 @@ def test_guest_validation(client):
 
 def test_bus_capacity(client):
     s = client.get("/api/bus/summary").json()
-    assert s == {**s, "maxSeats": 54, "bookedSeats": 10, "availableSeats": 44, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 45})
+    assert s == {**s, "maxSeats": 30, "bookedSeats": 10, "availableSeats": 20, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
+    # senza profilo né token organizzatore non si prenota: la navetta si prenota dal profilo (niente nomi fantasma)
+    r = client.post("/api/bus/bookings", json={"passengerName": "Anonimo", "seatsCount": 1})
+    assert r.status_code == 403 and "profilo" in r.json()["detail"]
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 21}, headers=ADMIN)
     assert r.status_code == 409
     # con allowWaitlist si finisce in lista d'attesa invece dell'errore; i posti confermati non cambiano
-    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 45, "allowWaitlist": True}, headers={"X-Client-Id": "w"})
+    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 21, "allowWaitlist": True}, headers={**ADMIN, "X-Client-Id": "w"})
     assert w.status_code == 201 and w.json()["status"] == "WAITLIST" and w.json()["code"].startswith("NP-")
-    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 45 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
+    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 21 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
     assert client.delete(f"/api/bus/bookings/{w.json()['id']}", headers={"X-Client-Id": "w"}).status_code == 204
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 44}, headers={"X-Client-Id": "c1"})
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 20}, headers={**ADMIN, "X-Client-Id": "c1"})
     assert r.status_code == 201
     assert client.get("/api/bus/summary").json()["availableSeats"] == 0
-    assert client.post("/api/bus/bookings", json={"passengerName": "Tardo", "seatsCount": 1}).status_code == 409
+    assert client.post("/api/bus/bookings", json={"passengerName": "Tardo", "seatsCount": 1}, headers=ADMIN).status_code == 409
     bid = r.json()["id"]
     assert client.delete(f"/api/bus/bookings/{bid}").status_code == 403
     assert client.delete(f"/api/bus/bookings/{bid}", headers={"X-Client-Id": "c1"}).status_code == 204
-    assert client.get("/api/bus/summary").json()["availableSeats"] == 44
+    assert client.get("/api/bus/summary").json()["availableSeats"] == 20
 
 
 def test_wishes(client):
@@ -567,7 +570,7 @@ def test_csv_export_requires_admin(client):
 
     r = client.get("/api/export/bus.csv", headers=ADMIN)
     lines = r.text.lstrip("\ufeff").splitlines()
-    assert lines[0].startswith("Passeggero;Posti;Stato;Codice;Fermata;Ritorno;Telefono;Email;Salito")
+    assert lines[0].startswith("Passeggero;Posti;Stato;Codice;Fermata;Ritorno;Telefono;Email;Invitato;Salito")
     assert lines[-2].startswith("TOTALE POSTI CONFERMATI;10;") and lines[-1].startswith("IN LISTA D'ATTESA;0;")
 
 
@@ -633,7 +636,8 @@ def test_schema_migration_adds_scheduled_at(tmp_path):
     con.commit(); con.close()
 
     assert ensure_schema(make_engine(str(path))) == [
-        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "+gift_targets.bancomat_pay", "+gift_targets.paypal_email", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
+        "+event_notifications.scheduled_at", "+gift_targets.email", "+gift_targets.access_token", "+gift_targets.bancomat_pay", "+gift_targets.paypal_email",
+        "+gift_targets.login_code_hash", "+gift_targets.login_code_expires_at", "+gift_targets.login_code_attempts", "-gift_contributions", "-gift_targets.target_amount", "-gift_targets.collected_amount",
     ]  # gift_pool_contributions non esiste ancora: create_all la crea già con le colonne del cassiere
     assert ensure_schema(make_engine(str(path))) == []  # idempotente
     with make_client(tmp_path, demo=False) as c:
