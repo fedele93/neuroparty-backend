@@ -134,7 +134,15 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
 
 
 def test_graduate_without_tokens_is_503(tmp_path):
+    # con un festeggiato che ha l'email (Cusmai nel JSON) l'accesso via link è possibile: 403, non 503
     with make_client(tmp_path, admin_token="") as c:
+        assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 403
+    with make_client(tmp_path / "a", admin_token="", demo=False) as c:
+        with c.app.state.session_factory() as db:
+            from app.models import GiftTarget
+            for t in db.query(GiftTarget).all():
+                t.email = ""
+            db.commit()
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 503
     with make_client(tmp_path / "b") as c:  # con ADMIN_TOKEN ma senza token festeggiati: 403, non 503
         assert c.get("/api/graduate/me", headers={"X-Graduate-Token": "x"}).status_code == 403
@@ -210,7 +218,8 @@ def test_role_invites_dry_run_and_send(tmp_path):
         assert by[("graduate", "totaro")]["status"] == "READY" and by[("graduate", "totaro")]["email"] == "dalila@example.org"
         assert by[("graduate", "luisi")]["status"] == "NO_EMAIL"
         assert by[("treasurer", "aki")]["status"] == "READY" and by[("treasurer", "roberto")]["status"] == "NO_EMAIL"
-        assert dry["ready"] == 3 and _mails(n8n) == []  # anteprima: nessuna email
+        assert by[("graduate", "cusmai")]["status"] == "READY"  # email nel JSON (francescocusmai96@gmail.com)
+        assert dry["ready"] == 4 and _mails(n8n) == []  # anteprima: nessuna email
         sent = c.post("/api/admin/invites", json={"dryRun": False, "testPhase": True, "ids": ["totaro", "aki"]}, headers=ADMIN).json()
         assert {(r["role"], r["id"]) for r in sent["invites"]} == {("graduate", "totaro"), ("treasurer", "aki")}
         mails = _mails(n8n)
