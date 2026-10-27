@@ -492,14 +492,16 @@ def test_schedule_placeholders_resolved_in_event(tmp_path):
         ev = c.get("/api/event").json()
         assert ev["schedule"]["partyDate"] == "2026-11-13"
         assert ev["schedule"]["partyTime"] == "21:30" and ev["schedule"]["partyEndTime"] == "03:00"
-        assert ev["schedule"]["ceremonyTime"] == ""  # seduta: ora ancora da definire
+        assert ev["schedule"]["ceremonyTime"] == "09:00"
         assert not re.search(r"\{\w+", json.dumps(ev))  # nessun segnaposto nei testi serviti
         festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
         assert festa["timeLabel"] == "Venerdì 13 novembre - dalle 21:30 alle 03:00"
         assert "Dalle ore 21:30 fino alle 03:00." in festa["description"]
         assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 21:30"
         seduta = next(p for p in ev["mapPoints"] if p["id"] == "seduta")
-        assert seduta["timeLabel"] == "9 Novembre - ora da definire"
+        assert seduta["timeLabel"] == "9 Novembre - ore 09:00"
+        assert "Inizio alle ore 09:00." in ev["program"]["timeline"][0]["details"] and ev["program"]["timeline"][0]["time"] == "Ore 09:00"
+        assert "video celebrativo" not in json.dumps(ev)
 
     # orari tolti/cambiati: le frasi si adattano (forma "da definire" e fine festa assente)
     data["schedule"]["partyTime"] = ""
@@ -526,7 +528,7 @@ def test_calendar_ics(tmp_path):
         body = r.text
         assert body.startswith("BEGIN:VCALENDAR") and body.rstrip().endswith("END:VCALENDAR")
         assert body.count("BEGIN:VEVENT") == 2
-        assert "DTSTART;VALUE=DATE:20261109" in body  # seduta senza orario: tutto il giorno
+        assert "DTSTART;TZID=Europe/Rome:20261109T090000" in body  # seduta alle 9:00, durata predefinita 3 h
         assert "DTSTART;TZID=Europe/Rome:20261113T213000" in body  # festa 21:30 -> 03:00 del giorno dopo
         assert "DTEND;TZID=Europe/Rome:20261114T030000" in body
         assert "LOCATION:Il Giardino dei Tempi - Orto Botanico\\, Via Giovanni Amendola 247\\, 70126 Bari" in body.replace("\r\n ", "")
