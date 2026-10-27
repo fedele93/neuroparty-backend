@@ -2,7 +2,7 @@
   "meta": { "maxBusSeats": 30, "menuDeadline": "2026-11-06", "busDeadline": "2026-11-11" },
   "schedule": {
     "ceremonyDate": "2026-11-09",
-    "ceremonyTime": "",
+    "ceremonyTime": "09:00",
     "partyDate": "2026-11-13",
     "partyTime": "21:30",
     "partyEndTime": "03:00",
@@ -32,7 +32,7 @@
       { "time": "Dopo", "title": "Brindisi Accademico & Foto di Rito", "location": "Aula Magna \"G. De Benedictis\" - Policlinico di Bari", "details": "Consegna dei diplomi, corona d'alloro e foto di rito con colleghi, docenti e parenti al termine della seduta del 9 novembre.", "more": true },
       { "time": "{busDepartureTime|Ven 13 ore $|Ven 13}", "title": "Ritrovo & Imbarco Autobus Navetta", "location": "Piazza Giulio Cesare (Policlinico di Bari)", "details": "Venerdì 13 novembre: ritrovo dei partecipanti e transfer riservato 30 posti verso Il Giardino dei Tempi - Orto Botanico (Via Giovanni Amendola 247, 70126 Bari). {busDepartureTime|Partenza alle ore $.|Orario di partenza da definire.}", "more": true },
       { "time": "{partyTime|Ven 13 ore $|Ven 13}", "title": "Festa di Specializzazione", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Venerdì 13 novembre al Giardino dei Tempi (Via Giovanni Amendola 247, 70126 Bari): aperitivo, cena a buffet e brindisi tutti insieme per festeggiare i 9 neo-neurologi. {partyTime|Dalle ore $|L'orario sarà comunicato a breve}{partyEndTime| fino alle $|}.", "more": true },
-      { "time": "Ven 13", "title": "Taglio della Torta & Dj Set", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Taglio della torta di specializzazione, video celebrativo a sorpresa, musica e balli per chiudere in bellezza la serata.", "more": false }
+      { "time": "Ven 13", "title": "Taglio della Torta & Dj Set", "location": "Il Giardino dei Tempi - Orto Botanico, Bari", "details": "Taglio della torta di specializzazione, musica e balli per chiudere in bellezza la serata.", "more": false }
     ]
   },
   "busSchedule": {
