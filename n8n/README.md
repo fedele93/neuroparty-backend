@@ -44,8 +44,10 @@ Varianti veloci:
 
 Il backend chiama il nodo **Webhook** ogni volta che succede qualcosa; il nodo **Code**
 trasforma l'evento in oggetto + testo e lascia passare solo quelli interessanti (nuovo RSVP,
-cambio di stato RSVP, prenotazione navetta, quota unica al cassiere, evento di test). Auguri, foto e
-notifiche vengono ignorati: basta aggiungere un `case` nello switch per riceverli.
+cambio di stato RSVP, prenotazione navetta, evento di test). Auguri, foto, notifiche e **quote uniche**
+vengono ignorati (le quote le vedono solo i cassieri, nemmeno gli organizzatori): basta aggiungere un
+`case` nello switch per riceverli. In alternativa l'evento si esclude già sul backend con
+`N8N_WEBHOOK_EVENTS` (es. `guest.*,bus.*,wish.*,photo.*,notification.*,mail.send,test`).
 
 Collegamento:
 
