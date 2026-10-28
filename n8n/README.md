@@ -44,8 +44,10 @@ Varianti veloci:
 
 Il backend chiama il nodo **Webhook** ogni volta che succede qualcosa; il nodo **Code**
 trasforma l'evento in oggetto + testo e lascia passare solo quelli interessanti (nuovo RSVP,
-cambio di stato RSVP, prenotazione navetta, quota unica al cassiere, evento di test). Auguri, foto e
-notifiche vengono ignorati: basta aggiungere un `case` nello switch per riceverli.
+cambio di stato RSVP, prenotazione navetta, evento di test). Auguri, foto, notifiche e **quote uniche**
+vengono ignorati (le quote le vedono solo i cassieri, nemmeno gli organizzatori): basta aggiungere un
+`case` nello switch per riceverli. In alternativa l'evento si esclude già sul backend con
+`N8N_WEBHOOK_EVENTS` (es. `guest.*,bus.*,wish.*,photo.*,notification.*,mail.send,test`).
 
 Collegamento:
 
@@ -107,7 +109,7 @@ I cassieri possono anche mandare il promemoria a mano dalla PWA (cruscotto Regal
 | `bus.booked` / `bus.cancelled` | `booking`, `bus` (posti totali/prenotati/liberi) |
 | `wish.created` | `wish` |
 | `photo.uploaded` | `photo` (con `imageUri` assoluto) |
-| `gift.pooled` | `contribution` (quota unica al cassiere, con `allocations` per neo-specialista), `summary` (totali aggiornati) |
+| `gift.pooled` | `contribution` (chi, metodo, cassiere, `graduates` = nomi dei neo-specialisti scelti; **senza cifre né recapiti**: le quote le vedono solo i cassieri), `summary` (solo conteggi: registrate, ricevute, in attesa) |
 | `gift.pool_deleted` | `contributionId` |
 | `notification.scheduled` | `notification` (programmata dagli organizzatori) |
 | `notification.published` | `notification`, `scheduled` (true se pubblicata dallo scheduler) |

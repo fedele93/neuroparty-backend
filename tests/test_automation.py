@@ -67,9 +67,12 @@ def test_webhook_events_and_signature(tmp_path):
         assert n8n.payload(1)["data"]["changes"] == {"rsvpStatus": "DECLINED"}
         assert n8n.payload(3)["data"]["bus"]["bookedSeats"] == 13  # 10 demo + 3
         assert n8n.payload(4)["data"]["bus"]["bookedSeats"] == 10
+        # quota unica: l'evento (che n8n gira agli organizzatori) dice chi, come e per quanti, mai le cifre
         pooled = n8n.payload(6)["data"]
-        assert pooled["contribution"]["donorName"] == "Nonna" and len(pooled["contribution"]["allocations"]) == 9
-        assert pooled["summary"]["totalAmount"] == 180 + 150 + 90 + 90  # demo + Nonna
+        assert pooled["contribution"]["donorName"] == "Nonna" and len(pooled["contribution"]["graduates"]) == 9
+        assert pooled["summary"] == {"contributions": 4, "received": 1, "pending": 3}  # 3 demo (1 ricevuta) + Nonna
+        assert "totalAmount" not in json.dumps(pooled) and "amount" not in json.dumps(pooled) and "allocations" not in pooled["contribution"]
+        assert "contact" not in pooled["contribution"] and "email" not in pooled["contribution"]
         assert n8n.payload(7)["data"]["scheduled"] is False
 
         # header: evento, segreto condiviso e firma HMAC del corpo
