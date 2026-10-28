@@ -136,6 +136,24 @@ def _all_pool(db: Session) -> list[GiftPoolContribution]:
     return db.scalars(select(GiftPoolContribution).order_by(GiftPoolContribution.created_at.desc())).all()
 
 
+def pool_event_payload(c: GiftPoolContribution, rows: list[GiftPoolContribution]) -> dict:
+    """Dati dell'evento gift.pooled per n8n: chi, come, a quale cassiere e per quanti neo-specialisti, mai le
+    cifre né i recapiti. Gli avvisi di n8n arrivano agli organizzatori, che non devono conoscere le quote
+    (le vedono solo i cassieri, con il loro token, in app e nel CSV)."""
+    return {
+        "contribution": {
+            "id": c.id, "donorName": c.donor_name, "paymentMethod": c.payment_method, "splitMode": c.split_mode,
+            "collectorId": c.collector_id, "collectorName": c.collector_name, "status": c.status, "createdAt": c.created_at,
+            "graduates": [a.graduate_name for a in c.allocations], "hasEmail": bool(c.email),
+        },
+        "summary": {
+            "contributions": len(rows),
+            "received": sum(1 for r in rows if r.status == POOL_STATUS_RECEIVED),
+            "pending": sum(1 for r in rows if r.status != POOL_STATUS_RECEIVED),
+        },
+    }
+
+
 def collectors_of(request: Request) -> list[dict]:
     return gift_collectors_info(request.app.state.event_data)
 
@@ -273,9 +291,7 @@ def add_pool_contribution(
     db.commit()
     db.refresh(contribution)
     result = contribution.to_dict()
-    request.app.state.webhooks.emit(
-        "gift.pooled", {"contribution": result, "summary": pool_board(_all_pool(db), targets, collectors, None)["summary"]}
-    )
+    request.app.state.webhooks.emit("gift.pooled", pool_event_payload(contribution, _all_pool(db)))
     if contribution.email:
         from ..deps import base_url_for
         from ..mail import pool_mail
