@@ -22,7 +22,7 @@ from .models import (
 )
 
 EMPTY_EVENT = {
-    "meta": {"maxBusSeats": 30},
+    "meta": {"maxBusSeats": 40},
     "graduates": [],
     "program": {"badge": "", "title": "", "subtitle": "", "dateLabel": "", "locationLabel": "", "partyLocationLabel": "", "timeline": []},
     "busSchedule": {"subtitle": "", "andata": {}, "ritorno": {}, "pickupStops": []},

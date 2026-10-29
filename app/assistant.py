@@ -70,7 +70,7 @@ TOOLS: list[dict] = [
                     "fullName": {"type": "string"},
                     "status": {"type": "string", "enum": ["CONFIRMED", "PENDING", "DECLINED"]},
                     "guestsCount": {"type": "integer", "minimum": 0, "maximum": 50, "description": "Persone in totale, compreso l'invitato"},
-                    "category": {"type": "string", "description": "Es. Famigliari, Colleghi Reparto, Amici Università"},
+                    "category": {"type": "string", "description": "Es. Familiari, Colleghi Reparto, Amici Università"},
                     "dietaryNotes": {"type": "string", "description": "Esigenze alimentari, vuoto se nessuna"},
                 },
                 "required": ["fullName", "status"],
@@ -87,7 +87,7 @@ TOOLS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "passengerName": {"type": "string"},
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 30},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 40},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                     "contactPhone": {"type": "string"},
@@ -218,7 +218,7 @@ PROFILE_TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Se omesso: le persone del profilo"},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 40, "description": "Se omesso: le persone del profilo"},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                 },

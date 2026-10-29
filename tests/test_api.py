@@ -11,7 +11,7 @@ def test_health_and_event(client):
     assert client.get("/api/health").json() == {"status": "ok"}
     ev = client.get("/api/event").json()
     assert len(ev["graduates"]) == 9
-    assert ev["meta"]["maxBusSeats"] == 30
+    assert ev["meta"]["maxBusSeats"] == 40
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
@@ -83,25 +83,25 @@ def test_guest_validation(client):
 
 def test_bus_capacity(client):
     s = client.get("/api/bus/summary").json()
-    assert s == {**s, "maxSeats": 30, "bookedSeats": 10, "availableSeats": 20, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
+    assert s == {**s, "maxSeats": 40, "bookedSeats": 10, "availableSeats": 30, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
     # senza profilo né token organizzatore non si prenota: la navetta si prenota dal profilo (niente nomi fantasma)
     r = client.post("/api/bus/bookings", json={"passengerName": "Anonimo", "seatsCount": 1})
     assert r.status_code == 403 and "profilo" in r.json()["detail"]
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 21}, headers=ADMIN)
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 31}, headers=ADMIN)
     assert r.status_code == 409
     # con allowWaitlist si finisce in lista d'attesa invece dell'errore; i posti confermati non cambiano
-    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 21, "allowWaitlist": True}, headers={**ADMIN, "X-Client-Id": "w"})
+    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 31, "allowWaitlist": True}, headers={**ADMIN, "X-Client-Id": "w"})
     assert w.status_code == 201 and w.json()["status"] == "WAITLIST" and w.json()["code"].startswith("NP-")
-    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 21 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
+    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 31 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
     assert client.delete(f"/api/bus/bookings/{w.json()['id']}", headers={"X-Client-Id": "w"}).status_code == 204
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 20}, headers={**ADMIN, "X-Client-Id": "c1"})
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 30}, headers={**ADMIN, "X-Client-Id": "c1"})
     assert r.status_code == 201
     assert client.get("/api/bus/summary").json()["availableSeats"] == 0
     assert client.post("/api/bus/bookings", json={"passengerName": "Tardo", "seatsCount": 1}, headers=ADMIN).status_code == 409
     bid = r.json()["id"]
     assert client.delete(f"/api/bus/bookings/{bid}").status_code == 403
     assert client.delete(f"/api/bus/bookings/{bid}", headers={"X-Client-Id": "c1"}).status_code == 204
-    assert client.get("/api/bus/summary").json()["availableSeats"] == 20
+    assert client.get("/api/bus/summary").json()["availableSeats"] == 30
 
 
 def test_wishes(client):
@@ -553,7 +553,7 @@ def test_guests_summary(client):
     assert s["confirmedGuests"] == 5 and s["covers"] == 10
     assert s["pendingGuests"] == 1 and s["pendingCovers"] == 2 and s["declinedGuests"] == 1
     cats = {c["category"]: c for c in s["byCategory"]}
-    assert cats["Famigliari"] == {"category": "Famigliari", "guests": 2, "covers": 6}
+    assert cats["Familiari"] == {"category": "Familiari", "guests": 2, "covers": 6}
     notes = {d["note"]: d for d in s["dietary"]}
     assert "Nessuna" not in notes and "Nessuna restrizione" not in notes
     assert notes["1 Celiaco (menu senza glutine)"]["guests"] == ["Matteo Moretti & Famiglia"]

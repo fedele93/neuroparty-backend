@@ -60,6 +60,9 @@ ADDED_COLUMNS = {
     },
 }
 
+# Valori da correggere nei dati già salvati (refuso "Famigliari" nella categoria degli invitati).
+DATA_FIXES = (("guests", "category", "Famigliari", "Familiari"),)
+
 # Indici per le query che girano a ogni poll (galleria dalla più recente, a cursore).
 ADDED_INDEXES = {"ix_shared_photos_created_id": "shared_photos(created_at DESC, id DESC)"}
 
@@ -84,6 +87,10 @@ def ensure_schema(engine) -> list[str]:
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
                     changes.append(f"+{table}.{name}")
+        for table, col, old, new in DATA_FIXES:
+            n = conn.execute(text(f"UPDATE {table} SET {col} = :new WHERE {col} = :old"), {"new": new, "old": old}).rowcount
+            if n:
+                changes.append(f"~{table}.{col}:{old}->{new}({n})")
         for name, ddl in ADDED_INDEXES.items():
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {ddl}"))
         for table in DROPPED_TABLES:
