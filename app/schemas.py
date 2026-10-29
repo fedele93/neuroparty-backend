@@ -54,6 +54,19 @@ class ProfileLinkRequest(BaseModel):
         return _email_ok(v)
 
 
+class PhotoCommentIn(BaseModel):
+    """Commento a una foto (solo testo: l'autore lo mette il server)."""
+    text: str = Field(min_length=1, max_length=300)
+
+    @field_validator("text")
+    @classmethod
+    def text_ok(cls, v: str) -> str:
+        v = " ".join(_clean(v).split())
+        if not v:
+            raise ValueError("Scrivi qualcosa")
+        return v
+
+
 class ProfileBusClaimIn(BaseModel):
     """Prenotazione navetta senza profilo da fare propria ("È la mia")."""
     bookingId: int

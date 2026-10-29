@@ -14,7 +14,7 @@ from ..models import (
     now_ms,
 )
 from ..push import subscription_count
-from ..routers.photos import photos_total, recent_photos
+from ..routers.photos import photos_total, recent_photos, with_comments
 from ..schedule import build_ics
 from ..seed import public_event_info
 from ..state import get_version
@@ -91,7 +91,7 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
         "guests": [g.to_dict() for g in guests],
         "busBookings": [b.to_dict() for b in bookings],
         "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()] if memories else [],
-        "photos": [p.to_dict(base) for p in photos],
+        "photos": with_comments(db, photos, base),
         "photosHasMore": photos_more,
         # il conteggio serve solo se c'è altro oltre la prima pagina
         "photosTotal": (photos_total(db) if photos_more else len(photos)) if memories else 0,

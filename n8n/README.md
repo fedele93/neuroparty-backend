@@ -109,6 +109,7 @@ I cassieri possono anche mandare il promemoria a mano dalla PWA (cruscotto Regal
 | `bus.booked` / `bus.cancelled` | `booking`, `bus` (posti totali/prenotati/liberi) |
 | `wish.created` | `wish` |
 | `photo.uploaded` | `photo` (con `imageUri` assoluto) |
+| `photo.commented` | `comment` (autore, testo), `photo` |
 | `gift.pooled` | `contribution` (chi, metodo, cassiere, `graduates` = nomi dei neo-specialisti scelti; **senza cifre né recapiti**: le quote le vedono solo i cassieri), `summary` (solo conteggi: registrate, ricevute, in attesa) |
 | `gift.pool_deleted` | `contributionId` |
 | `notification.scheduled` | `notification` (programmata dagli organizzatori) |
