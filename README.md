@@ -19,6 +19,7 @@ arrivano davvero a tutti.
 | Navetta (40 posti; si prenota dal profilo, `POST /api/bus/bookings` è l'inserimento a mano degli organizzatori; riconciliazione delle prenotazioni senza invitato) | `GET /api/bus/summary`, `GET/POST /api/bus/bookings`, `DELETE /api/bus/bookings/{id}`, `GET /api/admin/bus/orphans`, `POST /api/admin/bus/{id}/link`, `POST /api/admin/bus/{id}/create-guest`, `POST /api/profile/bus/claim` |
 | Bacheca auguri (solo registrati e ruoli) | `GET/POST /api/wishes`, `POST /api/wishes/{id}/heart`, `DELETE /api/wishes/{id}` (organizzatori) |
 | Galleria foto (upload, ridimensionamento a 1600 px; solo registrati e ruoli) | `GET/POST /api/photos`, `POST /api/photos/{id}/like`, `DELETE /api/photos/{id}` (organizzatori) |
+| Commenti alle foto (solo registrati; l'autore lo decide il server: profilo, festeggiato, cassiere o "Organizzatori") | `GET/POST /api/photos/{id}/comments`, `DELETE /api/photos/{id}/comments/{cid}` (autore o organizzatori) |
 | Regali: neo-specialisti con IBAN/PayPal/Satispay e cassiere delle quote uniche | `GET /api/gifts/targets`, `GET /api/gifts/collector` |
 | Quota unica al cassiere (ripartita fra i neo-specialisti) | `POST /api/gifts/pool`, `GET /api/gifts/pool/mine`, `DELETE /api/gifts/pool/{id}` |
 | Cruscotto del cassiere: elenco, totali per neo-specialista, stato "ricevuta" (anche in blocco), appunti | `GET /api/gifts/pool`, `PATCH /api/gifts/pool/{id}/status`, `POST /api/gifts/pool/status`, `PATCH /api/gifts/pool/{id}` (token cassiere o organizzatori) |
@@ -232,7 +233,7 @@ già inoltrato al container `api`):
    *Webhook* di n8n, ogni evento rilevante viene inviato come POST JSON
    `{"event": "bus.booked", "timestamp": ..., "data": {...}}`. Eventi: `guest.created`,
    `guest.updated`, `guest.deleted`, `bus.booked`, `bus.cancelled`, `bus.promoted`, `wish.created`,
-   `photo.uploaded`, `gift.pooled`, `gift.pool_deleted`, `notification.scheduled`, `notification.published`,
+   `photo.uploaded`, `photo.commented`, `gift.pooled`, `gift.pool_deleted`, `notification.scheduled`, `notification.published`,
    `mail.send`, `test`. L'evento `mail.send` è speciale: contiene un'email già pronta (`to`,
    `subject`, `text`, `html`, `attachments`, `kind`) che n8n deve solo spedire con il suo nodo
    Send Email già configurato; il backend non ha SMTP. Tipi (`kind`): `access_link`

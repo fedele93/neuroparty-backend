@@ -14,7 +14,7 @@ from ..mail import graduate_link_mail, treasurer_invite_mail
 from ..names import name_similarity
 from ..models import (
     AssistantAvatar, BusBooking, EventNotification, GiftCollectorToken, GiftPoolAllocation, GiftPoolContribution,
-    GiftTarget, Guest, MailOutbox, Meta, SharedPhoto, Wish, now_ms,
+    GiftTarget, Guest, MailOutbox, Meta, PhotoComment, SharedPhoto, Wish, now_ms,
 )
 from ..push import subscription_count
 from ..routers.bus import bus_summary, link_booking_to_guest
@@ -250,7 +250,7 @@ def reset_test_data(body: ResetIn, request: Request, db: Session = Depends(get_d
     counts = {}
     # prima ciò che rimanda ad altro (email e prenotazioni agli invitati, ripartizioni alle quote)
     for name, model in (("mails", MailOutbox), ("busBookings", BusBooking), ("poolAllocations", GiftPoolAllocation),
-                        ("poolContributions", GiftPoolContribution), ("wishes", Wish), ("photos", SharedPhoto),
+                        ("poolContributions", GiftPoolContribution), ("wishes", Wish), ("photoComments", PhotoComment), ("photos", SharedPhoto),
                         ("notifications", EventNotification), ("guests", Guest)):
         counts[name] = db.execute(delete(model)).rowcount or 0
     # i dati di esempio non devono tornare al prossimo riavvio

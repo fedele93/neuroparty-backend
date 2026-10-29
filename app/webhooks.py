@@ -52,6 +52,7 @@ EVENTS: dict[str, str] = {
     "bus.promoted": "Prenotazione passata dalla lista d'attesa a confermata (data.booking, data.bus)",
     "wish.created": "Nuovo augurio in bacheca (data.wish)",
     "photo.uploaded": "Nuova foto in galleria (data.photo, con imageUri assoluto)",
+    "photo.commented": "Nuovo commento a una foto (data.comment, data.photo)",
     "gift.pooled": "Nuova quota unica registrata per il cassiere (data.contribution con la ripartizione, data.summary)",
     "gift.pool_deleted": "Quota unica cancellata da chi l'aveva registrata o dal cassiere (data.contributionId)",
     "guest.imported": "Lista invitati importata dagli organizzatori (data.created, data.updated, data.invited)",

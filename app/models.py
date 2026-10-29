@@ -194,6 +194,23 @@ class SharedPhoto(Base):
         }
 
 
+class PhotoComment(Base):
+    """Commento a una foto della galleria, dei soli registrati (profilo o ruolo). L'autore lo decide il server:
+    nome del profilo, del festeggiato, del cassiere, oppure "Organizzatori"; mai un nome libero."""
+    __tablename__ = "photo_comments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    photo_id: Mapped[int] = mapped_column(Integer, index=True)
+    guest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # invitato con profilo; None per i ruoli
+    author_name: Mapped[str] = mapped_column(String(200))
+    author_kind: Mapped[str] = mapped_column(String(20), default="guest")  # guest | graduate | treasurer | admin
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "photoId": self.photo_id, "authorName": self.author_name, "authorKind": self.author_kind,
+                "text": self.text, "createdAt": self.created_at}
+
+
 class GiftTarget(Base):
     """Neo-specialista destinatario di un regalo, con le coordinate per donargli direttamente.
     Nessun importo: obiettivi e cifre raccolte non vengono né registrati né mostrati."""
