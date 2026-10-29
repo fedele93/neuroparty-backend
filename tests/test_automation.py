@@ -157,7 +157,7 @@ def test_report_json_text_html(client):
     rep = client.get("/api/automation/report", headers=ADMIN).json()
     assert rep["event"]["partyDate"] == "2026-11-13" and rep["event"]["title"]
     assert rep["guests"]["totalGuests"] == 8 and rep["guests"]["covers"] == client.get("/api/guests/summary", headers=ADMIN).json()["covers"]
-    assert rep["bus"] == {**rep["bus"], "maxSeats": 30, "bookedSeats": 10, "availableSeats": 20, "bookings": 3}
+    assert rep["bus"] == {**rep["bus"], "maxSeats": 40, "bookedSeats": 10, "availableSeats": 30, "bookings": 3}
     assert sum(s["seats"] for s in rep["bus"]["byStop"]) == 10
     assert rep["gifts"]["graduates"] == 9 and rep["gifts"]["contributions"] == 3
     # niente cifre nel report: le vedono solo i cassieri con il loro token

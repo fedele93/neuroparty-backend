@@ -115,7 +115,7 @@ def test_graduate_area_wish_mail_and_own_avatar(tmp_path, monkeypatch):
         # 2 auguri di questo test + quello dimostrativo dei colleghi; quelli per altri festeggiati non ci sono
         assert me["wishesForMe"] == 3 and [w["message"] for w in me["wishes"]][:2] == ["Evviva", "Auguri dottore"]
         assert all(w["targetGraduate"] in ("Fedele Luisi", "Tutti i Laureandi") for w in me["wishes"])
-        assert me["bus"]["maxSeats"] == 30 and "passengers" in me["bus"]
+        assert me["bus"]["maxSeats"] == 40 and "passengers" in me["bus"]
         assert me["avatar"]["id"] == "luisi" and me["assistantConfigured"] is True
         # con token organizzatore serve l'id
         assert c.get("/api/graduate/me?graduate_id=luisi", headers=ADMIN).json()["graduate"]["id"] == "luisi"

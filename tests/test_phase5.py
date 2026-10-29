@@ -75,7 +75,7 @@ def test_import_guests_and_dashboard(tmp_path):
         before = c.get("/api/guests", headers=ADMIN).json()
         existing = before[0]["fullName"]
         rows = [
-            {"fullName": existing, "email": "primo@example.org", "category": "Famigliari"},   # abbinato per nome: aggiornato
+            {"fullName": existing, "email": "primo@example.org", "category": "Familiari"},   # abbinato per nome: aggiornato
             {"fullName": "Nuova Importata", "email": "Nuova@Example.org", "phone": "333", "guestsCount": 3},  # creata
             {"fullName": "Senza Email"},                                                      # creata, nessun invito
             {"fullName": "", "email": "x@example.org"},                                        # saltata
@@ -95,7 +95,7 @@ def test_import_guests_and_dashboard(tmp_path):
         assert d["created"] == 2 and d["updated"] == 1 and d["invited"] == 2 and d["inviteFailed"] == 0
         after = {g["fullName"]: g for g in c.get("/api/guests", headers=ADMIN).json()}
         assert len(after) == len(before) + 2
-        assert after[existing]["email"] == "primo@example.org" and after[existing]["category"] == "Famigliari"
+        assert after[existing]["email"] == "primo@example.org" and after[existing]["category"] == "Familiari"
         nuova = after["Nuova Importata"]
         assert nuova["email"] == "nuova@example.org" and nuova["guestsCount"] == 3 and nuova["rsvpStatus"] == "PENDING" and nuova["hasProfile"]
         mails = _mails(n8n)
@@ -110,7 +110,7 @@ def test_import_guests_and_dashboard(tmp_path):
         dash = c.get("/api/admin/dashboard", headers=ADMIN).json()
         g = dash["guests"]
         assert g["total"] == len(before) + 2 and g["withEmail"] >= 2 and g["withProfile"] >= 2 and g["pending"] >= 2
-        assert dash["bus"]["maxSeats"] == 30 and "waitlistBookings" in dash["bus"]
+        assert dash["bus"]["maxSeats"] == 40 and "waitlistBookings" in dash["bus"]
         assert dash["mail"]["enabled"] is True and dash["mail"]["counts"].get("DELIVERED") == 2 and dash["mail"]["failed"] == []
         assert dash["pool"]["contributions"] >= 1 and [x["id"] for x in dash["pool"]["collectors"]] == ["roberto", "aki"]
         assert dash["assistant"] == {"configured": True, "avatars": 9, "ready": 1}

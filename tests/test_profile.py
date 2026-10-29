@@ -39,7 +39,7 @@ def test_link_request_profile_update_and_confirmation_mail(tmp_path):
         me = c.get("/api/profile", headers=H).json()["guest"]
         assert me["fullName"] == "Zia Pina" and me["email"] == "zia.pina@example.org"
         body = {
-            "fullName": "Zia Pina", "category": "Famigliari", "rsvpStatus": "CONFIRMED", "email": "zia.pina@example.org",
+            "fullName": "Zia Pina", "category": "Familiari", "rsvpStatus": "CONFIRMED", "email": "zia.pina@example.org",
             "phone": "333 1234567", "menu": "VEGETARIANO", "dietaryNotes": "allergia alle noci",
             "companions": [{"name": "Zio Tonio", "menu": "STANDARD"}, {"name": "Nipotina", "menu": "SENZA_GLUTINE", "notes": "celiaca"}, {"name": "  ", "menu": ""}],
         }
@@ -202,7 +202,7 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         G, S = {"X-Guest-Token": gatti_token}, {"X-Guest-Token": sofia_token}
 
         prof = c.get("/api/profile", headers=G).json()
-        assert prof["busBooking"] is None and prof["bus"]["availableSeats"] == 20 and prof["deadlines"]["busDeadline"] == "2026-11-11"
+        assert prof["busBooking"] is None and prof["bus"]["availableSeats"] == 30 and prof["deadlines"]["busDeadline"] == "2026-11-11"
 
         # prenotazione dal profilo: posti = persone (2), email di conferma con il file calendario
         r = c.put("/api/profile/bus", json={"pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)", "returnTripWanted": True}, headers=G)
@@ -221,11 +221,11 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         assert r.json()["busBooking"]["seatsCount"] == 3 and r.json()["busBooking"]["id"] == b["id"]
         assert len([x for x in c.get("/api/bus/bookings", headers=ADMIN).json() if x["guestId"] == gatti_id]) == 1
 
-        # Sofia chiede 18 posti: ne restano 17 -> lista d'attesa + email dedicata
-        r = c.put("/api/profile/bus", json={"seatsCount": 18}, headers=S)
+        # Sofia chiede 28 posti: ne restano 27 -> lista d'attesa + email dedicata
+        r = c.put("/api/profile/bus", json={"seatsCount": 28}, headers=S)
         assert r.status_code == 200 and r.json()["busBooking"]["status"] == "WAITLIST"
         assert _mail_events(n8n)[-1]["kind"] == "bus_waitlist" and "lista d'attesa" in _mail_events(n8n)[-1]["subject"]
-        assert c.get("/api/bus/summary").json()["waitlistSeats"] == 18
+        assert c.get("/api/bus/summary").json()["waitlistSeats"] == 28
         # Gatti annulla: Sofia viene promossa e riceve "posto confermato" con il calendario
         r = c.delete("/api/profile/bus", headers=G)
         assert r.status_code == 200 and r.json()["busBooking"] is None
@@ -235,14 +235,14 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         assert promoted["to"] == "sofia@example.org" and promoted["attachments"]
         assert "bus.promoted" in n8n.events
         assert c.get("/api/profile", headers=S).json()["busBooking"]["status"] == "CONFIRMED"
-        assert c.get("/api/bus/summary").json() == {**c.get("/api/bus/summary").json(), "bookedSeats": 28, "waitlistSeats": 0}
+        assert c.get("/api/bus/summary").json() == {**c.get("/api/bus/summary").json(), "bookedSeats": 38, "waitlistSeats": 0}
         assert c.delete("/api/profile/bus", headers=G).status_code == 404
 
         # check-in degli organizzatori e CSV
         sofia_b = c.get("/api/profile", headers=S).json()["busBooking"]
         assert c.post(f"/api/bus/bookings/{sofia_b['id']}/checkin", json={"checkedIn": True}).status_code == 403
         assert c.post(f"/api/bus/bookings/{sofia_b['id']}/checkin", json={"checkedIn": True}, headers=ADMIN).json()["checkedInAt"]
-        assert c.get("/api/bus/summary").json()["checkedInSeats"] == 18
+        assert c.get("/api/bus/summary").json()["checkedInSeats"] == 28
         lines = c.get("/api/export/bus.csv", headers=ADMIN).text.lstrip("\ufeff").splitlines()
         row = next(ln for ln in lines if ln.startswith("Dott.ssa Sofia Valenti;"))
         assert row.split(";")[2:4] == ["Confermata", sofia_b["code"]] and row.split(";")[7:9] == ["sofia@example.org", "Sì"]
