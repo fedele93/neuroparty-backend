@@ -17,7 +17,7 @@ from ..push import subscription_count
 from ..routers.photos import photos_total, recent_photos, with_comments
 from ..schedule import build_ics
 from ..seed import public_event_info
-from ..state import get_version
+from ..state import get_version, photos_download_enabled
 
 router = APIRouter(prefix="/api", tags=["evento"])
 
@@ -93,6 +93,8 @@ def snapshot(request: Request, db: Session = Depends(get_db)):
         "wishes": [w.to_dict() for w in db.scalars(select(Wish).order_by(Wish.created_at.desc())).all()] if memories else [],
         "photos": with_comments(db, photos, base),
         "photosHasMore": photos_more,
+        # l'organizzatore può concedere il download di tutte le foto in uno zip (GET /api/photos/archive.zip)
+        "photosDownloadEnabled": photos_download_enabled(db) if memories else False,
         # il conteggio serve solo se c'è altro oltre la prima pagina
         "photosTotal": (photos_total(db) if photos_more else len(photos)) if memories else 0,
         # niente importi né elenco delle quote: le quote uniche le vede solo il cassiere (GET /api/gifts/pool)

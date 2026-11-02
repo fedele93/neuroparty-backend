@@ -87,7 +87,7 @@ TOOLS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "passengerName": {"type": "string"},
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 40},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 50},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                     "contactPhone": {"type": "string"},
@@ -218,7 +218,7 @@ PROFILE_TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 40, "description": "Se omesso: le persone del profilo"},
+                    "seatsCount": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Se omesso: le persone del profilo"},
                     "pickupStop": {"type": "string", "description": "Una delle fermate previste"},
                     "returnTripWanted": {"type": "boolean"},
                 },

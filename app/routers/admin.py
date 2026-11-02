@@ -23,7 +23,7 @@ from ..routers.graduate import graduate_link
 from ..routers.guests import guests_summary
 from ..routers.photos import remove_photo_files
 from ..seed import gift_collectors_info
-from ..state import bump_version
+from ..state import bump_version, photos_download_enabled, set_photos_download
 
 router = APIRouter(prefix="/api/admin", tags=["organizzatori"], dependencies=[Depends(require_admin)])
 
@@ -89,8 +89,23 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "pushSubscriptions": subscription_count(db),
         "assistant": {"configured": svc.client.enabled, "avatars": len(avatars), "ready": len(ready)},
         "deadlines": deadlines,
+        "settings": {"photosDownload": photos_download_enabled(db)},
         "todo": todo,
     }
+
+
+class SettingsIn(BaseModel):
+    """Impostazioni della festa modificabili dal cruscotto. Solo i campi presenti vengono cambiati."""
+    photosDownload: bool | None = None
+
+
+@router.put("/settings")
+def update_settings(body: SettingsIn, db: Session = Depends(get_db)):
+    """Accende/spegne le funzioni concesse agli invitati: per ora il download di tutte le foto in uno zip."""
+    if body.photosDownload is not None:
+        set_photos_download(db, body.photosDownload)
+    db.commit()
+    return {"photosDownload": photos_download_enabled(db)}
 
 
 # ------------------------------------------------------------------ navetta: prenotazioni senza invitato
