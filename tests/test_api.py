@@ -498,6 +498,9 @@ def test_schedule_placeholders_resolved_in_event(tmp_path):
         assert festa["timeLabel"] == "Venerdì 13 novembre - dalle 21:30 alle 03:00"
         assert "Dalle ore 21:30 fino alle 03:00." in festa["description"]
         assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 21:30"
+        assert ev["schedule"]["busDepartureTime"] == "21:30" and ev["schedule"]["busReturnTime"] == "02:30"
+        assert ev["program"]["timeline"][2]["time"] == "Ven 13 ore 21:30" and "Partenza alle ore 21:30." in ev["program"]["timeline"][2]["details"]
+        assert ev["busSchedule"]["ritorno"]["timeLabel"] == "Ven 13 - ore 02:30" and "rientro alle ore 02:30" in ev["busSchedule"]["ritorno"]["notes"]
         seduta = next(p for p in ev["mapPoints"] if p["id"] == "seduta")
         assert seduta["timeLabel"] == "9 Novembre - ore 09:30"
         assert "Inizio alle ore 09:30." in ev["program"]["timeline"][0]["details"] and ev["program"]["timeline"][0]["time"] == "Ore 09:30"

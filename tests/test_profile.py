@@ -215,7 +215,7 @@ def test_bus_from_profile_waitlist_promotion_and_mails(tmp_path):
         assert "Piazza Giulio Cesare" in mail["text"] and mail["attachments"][0]["filename"] == "navetta.ics"
         import base64
         ics = base64.b64decode(mail["attachments"][0]["contentBase64"]).decode()
-        assert "BEGIN:VEVENT" in ics and "DTSTART;VALUE=DATE:20261113" in ics and b["code"] in ics  # orario navetta da definire: tutto il giorno
+        assert "BEGIN:VEVENT" in ics and "DTSTART;TZID=Europe/Rome:20261113T213000" in ics and b["code"] in ics  # navetta alle 21:30
         # una sola prenotazione per profilo: la seconda chiamata la aggiorna
         r = c.put("/api/profile/bus", json={"seatsCount": 3, "pickupStop": "Piazza Giulio Cesare (Policlinico di Bari)"}, headers=G)
         assert r.json()["busBooking"]["seatsCount"] == 3 and r.json()["busBooking"]["id"] == b["id"]
