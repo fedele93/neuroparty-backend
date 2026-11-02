@@ -6,8 +6,8 @@
     "partyDate": "2026-11-13",
     "partyTime": "21:30",
     "partyEndTime": "03:00",
-    "busDepartureTime": "",
-    "busReturnTime": ""
+    "busDepartureTime": "21:30",
+    "busReturnTime": "02:30"
   },
   "graduates": [
     "Fedele Luisi",
@@ -38,7 +38,7 @@
   "busSchedule": {
     "subtitle": "Transfer andata e ritorno da Piazza Giulio Cesare (Policlinico di Bari) al Giardino dei Tempi",
     "andata": { "timeLabel": "Ven 13 - {busDepartureTime|ore $|da definire}", "from": "Piazza Giulio Cesare (Policlinico di Bari)", "to": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "notes": "Venerdì 13 novembre: {busDepartureTime|partenza alle ore $ da Piazza Giulio Cesare (ingresso del Policlinico)|orario di partenza in via di definizione, sarà confermato con l'orario della festa}" },
-    "ritorno": { "timeLabel": "Ven 13 - {busReturnTime|ore $|notte}", "from": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "to": "Piazza Giulio Cesare (Policlinico di Bari)", "notes": "Rientro notturno garantito per tornare a casa in totale sicurezza" },
+    "ritorno": { "timeLabel": "Ven 13 - {busReturnTime|ore $|notte}", "from": "Il Giardino dei Tempi - Orto Botanico (Via Amendola 247)", "to": "Piazza Giulio Cesare (Policlinico di Bari)", "notes": "{busReturnTime|Partenza del rientro alle ore $ dal Giardino dei Tempi.|Rientro notturno garantito per tornare a casa in totale sicurezza}" },
     "pickupStops": [
       "Piazza Giulio Cesare (Policlinico di Bari)"
     ]
