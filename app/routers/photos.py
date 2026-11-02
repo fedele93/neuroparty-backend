@@ -1,9 +1,13 @@
 import io
 import os
+import tempfile
 import threading
 import uuid
+import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import and_, delete, func, or_, select
 from starlette.concurrency import run_in_threadpool
@@ -14,7 +18,7 @@ from ..deps import base_url_for, get_db
 from ..models import GiftTarget, Guest, PhotoComment, SharedPhoto, now_ms
 from ..schemas import PhotoCommentIn
 from ..seed import gift_collectors_info
-from ..state import bump_version
+from ..state import bump_version, photos_download_enabled
 
 router = APIRouter(prefix="/api/photos", tags=["foto"])
 
@@ -145,6 +149,37 @@ def list_photos(request: Request, db: Session = Depends(get_db)):
     base = base_url_for(request)
     rows = db.scalars(select(SharedPhoto).order_by(*NEWEST_FIRST)).all()
     return with_comments(db, rows, base)
+
+
+def _build_archive(upload_dir: str, photos: list[SharedPhoto]) -> str:
+    """Zip con le foto intere (già ridimensionate a 1600 px, quindi senza ricompressione) in un file temporaneo;
+    il nome di ogni file porta il numero d'ordine e l'autore. Ritorna il percorso del file."""
+    import re
+
+    tmp = tempfile.NamedTemporaryFile(prefix="neuroparty-foto-", suffix=".zip", delete=False)
+    tmp.close()
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED) as z:
+        for i, p in enumerate(photos, 1):
+            src = _upload_file(upload_dir, p.image_path)
+            if not p.image_path or not os.path.exists(src):
+                continue
+            author = re.sub(r"[^A-Za-z0-9]+", "-", p.author_name).strip("-") or "foto"
+            z.write(src, f"{i:03d}-{author}{os.path.splitext(src)[1].lower() or '.jpg'}")
+    return tmp.name
+
+
+@router.get("/archive.zip", dependencies=[Depends(require_member)])
+async def photos_archive(request: Request, db: Session = Depends(get_db)):
+    """Tutte le foto in un unico zip, per gli invitati registrati, solo se l'organizzatore ha acceso il download
+    dal cruscotto (PUT /api/admin/settings). Costruito in un thread e cancellato dopo l'invio."""
+    if not photos_download_enabled(db):
+        raise HTTPException(409, "Il download di tutte le foto non è attivo: lo accendono gli organizzatori")
+    photos = db.scalars(select(SharedPhoto).where(SharedPhoto.image_path != "").order_by(SharedPhoto.created_at.asc(), SharedPhoto.id.asc())).all()
+    if not photos:
+        raise HTTPException(404, "Nessuna foto da scaricare")
+    path = await run_in_threadpool(_build_archive, request.app.state.settings.upload_dir, photos)
+    return FileResponse(path, media_type="application/zip", filename="foto-neuroparty.zip",
+                        headers={"Cache-Control": "no-store"}, background=BackgroundTask(os.remove, path))
 
 
 @router.get("/page", dependencies=[Depends(require_member)])

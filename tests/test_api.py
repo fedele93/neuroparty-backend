@@ -11,7 +11,7 @@ def test_health_and_event(client):
     assert client.get("/api/health").json() == {"status": "ok"}
     ev = client.get("/api/event").json()
     assert len(ev["graduates"]) == 9
-    assert ev["meta"]["maxBusSeats"] == 40
+    assert ev["meta"]["maxBusSeats"] == 50
     assert len(ev["program"]["timeline"]) == 5
     assert ev["giftCollector"]["name"] == "Dott. Paolo Roberto"  # primo cassiere (compatibilità Android)
     assert [c["id"] for c in ev["giftCollectors"]] == ["roberto", "aki"]
@@ -83,25 +83,25 @@ def test_guest_validation(client):
 
 def test_bus_capacity(client):
     s = client.get("/api/bus/summary").json()
-    assert s == {**s, "maxSeats": 40, "bookedSeats": 10, "availableSeats": 30, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
+    assert s == {**s, "maxSeats": 50, "bookedSeats": 10, "availableSeats": 40, "waitlistSeats": 0, "busDeadline": "2026-11-11"}
     # senza profilo né token organizzatore non si prenota: la navetta si prenota dal profilo (niente nomi fantasma)
     r = client.post("/api/bus/bookings", json={"passengerName": "Anonimo", "seatsCount": 1})
     assert r.status_code == 403 and "profilo" in r.json()["detail"]
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 31}, headers=ADMIN)
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 41}, headers=ADMIN)
     assert r.status_code == 409
     # con allowWaitlist si finisce in lista d'attesa invece dell'errore; i posti confermati non cambiano
-    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 31, "allowWaitlist": True}, headers={**ADMIN, "X-Client-Id": "w"})
+    w = client.post("/api/bus/bookings", json={"passengerName": "Attesa", "seatsCount": 41, "allowWaitlist": True}, headers={**ADMIN, "X-Client-Id": "w"})
     assert w.status_code == 201 and w.json()["status"] == "WAITLIST" and w.json()["code"].startswith("NP-")
-    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 31 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
+    assert client.get("/api/bus/summary").json()["waitlistSeats"] == 41 and client.get("/api/bus/summary").json()["bookedSeats"] == 10
     assert client.delete(f"/api/bus/bookings/{w.json()['id']}", headers={"X-Client-Id": "w"}).status_code == 204
-    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 30}, headers={**ADMIN, "X-Client-Id": "c1"})
+    r = client.post("/api/bus/bookings", json={"passengerName": "Gruppo", "seatsCount": 40}, headers={**ADMIN, "X-Client-Id": "c1"})
     assert r.status_code == 201
     assert client.get("/api/bus/summary").json()["availableSeats"] == 0
     assert client.post("/api/bus/bookings", json={"passengerName": "Tardo", "seatsCount": 1}, headers=ADMIN).status_code == 409
     bid = r.json()["id"]
     assert client.delete(f"/api/bus/bookings/{bid}").status_code == 403
     assert client.delete(f"/api/bus/bookings/{bid}", headers={"X-Client-Id": "c1"}).status_code == 204
-    assert client.get("/api/bus/summary").json()["availableSeats"] == 30
+    assert client.get("/api/bus/summary").json()["availableSeats"] == 40
 
 
 def test_wishes(client):
@@ -492,15 +492,16 @@ def test_schedule_placeholders_resolved_in_event(tmp_path):
         ev = c.get("/api/event").json()
         assert ev["schedule"]["partyDate"] == "2026-11-13"
         assert ev["schedule"]["partyTime"] == "21:30" and ev["schedule"]["partyEndTime"] == "03:00"
-        assert ev["schedule"]["ceremonyTime"] == "09:00"
+        assert ev["schedule"]["ceremonyTime"] == "09:30"
         assert not re.search(r"\{\w+", json.dumps(ev))  # nessun segnaposto nei testi serviti
         festa = next(p for p in ev["mapPoints"] if p["id"] == "festa")
         assert festa["timeLabel"] == "Venerdì 13 novembre - dalle 21:30 alle 03:00"
         assert "Dalle ore 21:30 fino alle 03:00." in festa["description"]
         assert ev["program"]["timeline"][3]["time"] == "Ven 13 ore 21:30"
         seduta = next(p for p in ev["mapPoints"] if p["id"] == "seduta")
-        assert seduta["timeLabel"] == "9 Novembre - ore 09:00"
-        assert "Inizio alle ore 09:00." in ev["program"]["timeline"][0]["details"] and ev["program"]["timeline"][0]["time"] == "Ore 09:00"
+        assert seduta["timeLabel"] == "9 Novembre - ore 09:30"
+        assert "Inizio alle ore 09:30." in ev["program"]["timeline"][0]["details"] and ev["program"]["timeline"][0]["time"] == "Ore 09:30"
+        assert "10 minuti" in ev["program"]["timeline"][0]["details"] and "9:30 Carlone" in ev["program"]["timeline"][0]["details"] and "10:50 Totaro" in seduta["description"]
         assert "video celebrativo" not in json.dumps(ev)
 
     # orari tolti/cambiati: le frasi si adattano (forma "da definire" e fine festa assente)
@@ -528,7 +529,7 @@ def test_calendar_ics(tmp_path):
         body = r.text
         assert body.startswith("BEGIN:VCALENDAR") and body.rstrip().endswith("END:VCALENDAR")
         assert body.count("BEGIN:VEVENT") == 2
-        assert "DTSTART;TZID=Europe/Rome:20261109T090000" in body  # seduta alle 9:00, durata predefinita 3 h
+        assert "DTSTART;TZID=Europe/Rome:20261109T093000" in body  # seduta alle 9:30, durata predefinita 3 h
         assert "DTSTART;TZID=Europe/Rome:20261113T213000" in body  # festa 21:30 -> 03:00 del giorno dopo
         assert "DTEND;TZID=Europe/Rome:20261114T030000" in body
         assert "LOCATION:Il Giardino dei Tempi - Orto Botanico\\, Via Giovanni Amendola 247\\, 70126 Bari" in body.replace("\r\n ", "")
