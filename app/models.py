@@ -178,6 +178,8 @@ class SharedPhoto(Base):
     thumb_path: Mapped[str] = mapped_column(String(300), default="")
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    # etichetta facoltativa: "coppie" = foto del gioco delle coppie (filtro in galleria)
+    tag: Mapped[str] = mapped_column(String(30), default="")
 
     def to_dict(self, base_url: str = "") -> dict:
         image_uri = f"{base_url}{self.image_path}" if self.image_path else ""
@@ -191,6 +193,7 @@ class SharedPhoto(Base):
             "thumbUri": thumb_uri,
             "likesCount": self.likes_count,
             "createdAt": self.created_at,
+            "tag": self.tag or "",
         }
 
 

@@ -26,6 +26,7 @@ MAX_SIDE = 1600  # le foto vengono ridimensionate per risparmiare spazio e banda
 THUMB_SIDE = 480  # miniatura per la galleria
 PAGE_SIZE = 24  # foto per pagina: lo snapshot manda solo le più recenti, le altre a richiesta
 MAX_PAGE_SIZE = 60
+PHOTO_TAGS = {"", "coppie"}  # etichette ammesse: "coppie" = gioco delle coppie
 PREVIEW_COMMENTS = 2  # ultimi commenti mostrati nella card della galleria; il resto si chiede aprendo la foto
 COMMENT_MIN_INTERVAL_MS = 5_000  # anti doppio tocco / spam: un commento ogni 5 s per autore
 
@@ -203,11 +204,15 @@ async def upload_photo(
     file: UploadFile = File(...),
     authorName: str = Form(default="Invitato"),
     caption: str = Form(default=""),
+    tag: str = Form(default=""),
     db: Session = Depends(get_db),
     member: Guest | None = Depends(require_member),
 ):
-    """Nuova foto. Per gli invitati registrati l'autore è il nome del profilo."""
+    """Nuova foto. Per gli invitati registrati l'autore è il nome del profilo. tag="coppie" = foto del gioco delle coppie."""
     settings = request.app.state.settings
+    tag = (tag or "").strip().lower()
+    if tag not in PHOTO_TAGS:
+        raise HTTPException(422, "Etichetta della foto non valida")
     raw = await file.read()
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"Immagine troppo grande (max {settings.max_upload_mb} MB)")
@@ -223,6 +228,7 @@ async def upload_photo(
         image_path=image_path,
         thumb_path=thumb,
         likes_count=1,
+        tag=tag,
     )
     db.add(photo)
     bump_version(db)

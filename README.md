@@ -130,6 +130,7 @@ nano .env
 | `MISTRAL_API_KEY` | chiave API Mistral per l'assistente vocale (vuota = assistente spento); vedi *Assistente vocale* |
 | `GIFT_SYNC_UPDATE_TEXTS` | `true` per aggiornare testi/IBAN/link dei regali già in database dal JSON al riavvio; di default `false` |
 | `PWA_DIR` | `../spec2026app/pwa` (cartella della PWA da servire) |
+| `EVENT_TODAY` | facoltativa, `AAAA-MM-GG`: fissa "oggi" per le date limite (solo per test e prove) |
 | `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `N8N_WEBHOOK_EVENTS`, `AUTOMATION_TOKEN` | opzionali, per collegare n8n (vedi *Automazioni con n8n*) |
 
 ### 4. Avvio

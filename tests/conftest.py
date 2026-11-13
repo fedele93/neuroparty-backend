@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# le date limite (menu 6/11, navetta 11/11) non devono dipendere dal giorno in cui girano i test
+os.environ.setdefault("EVENT_TODAY", "2026-11-01")
 
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
